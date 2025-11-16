@@ -1,0 +1,5 @@
+{
+  "name": "AI Support Assistant Chatbot",
+  "description": "An AI-powered chatbot designed to assist support agents by generating structured responses in various formats, mimicking a Slack-like interface.",
+  "requestFramePermissions": []
+}
