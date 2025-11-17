@@ -1,5 +1,3 @@
-
-
 // --- Imports ---
 import React from 'react';
 import ReactDOM from 'react-dom/client';
@@ -126,6 +124,14 @@ const FORMAT_DEFINITIONS = {
     `,
   CR: `This is not a generation format. This channel is for displaying and updating your core rules.`
 };
+
+const EMPTY_STATE_MESSAGES = {
+    EO: "Ready to draft a detailed email? Paste a customer's message, like 'My payment failed, can you help?', or describe a scenario to generate a complete email outline.",
+    CL: "Need to get the facts straight? Provide a complex user issue, such as 'The user is reporting a discrepancy in their payout report for last month', to receive a clear, scannable list of key details and action items.",
+    INV: "Time to document your findings. Paste a chat transcript or case details to create a comprehensive internal note, perfect for handovers or escalations.",
+    QS: "Have a long thread to read? Paste it here to get a quick summary of the key points. Great for catching up on a case before you dive in.",
+    CF: "Need help from another team? Describe the user's problem to generate a structured consult form. For example, 'User needs an exception for a risk decline, consulting the Risk team.'"
+};
 // --- End of constants.ts ---
 
 
@@ -140,16 +146,16 @@ const initAi = (apiKey) => {
   }
 };
 
-const generateResponse = async (userQuery, format, combinedHistory, coreRules, isNewContext) => {
+const generateResponseStream = async (userQuery, format, channelHistory, coreRules, isNewContext) => {
   if (!ai) {
-    return "API key has not been initialized. Please provide an API key.";
+    throw new Error("API key has not been initialized. Please provide an API key.");
   }
 
   const formatTemplate = FORMAT_DEFINITIONS[format];
   
   const historyForPrompt = isNewContext 
     ? `The user has started a new context. IGNORE all previous conversation history. The new context is:\n\n"${userQuery}"`
-    : `# CONVERSATION HISTORY (from all channels)\nThis is the recent conversation history. Use it for context.\n${combinedHistory}`;
+    : `# CONVERSATION HISTORY (from this channel)\nThis is the recent conversation history for this channel. Use it for context.\n${channelHistory}`;
 
   const fullPrompt = `
     ${SYSTEM_PROMPT}
@@ -168,7 +174,7 @@ const generateResponse = async (userQuery, format, combinedHistory, coreRules, i
 
     # RESPONSE INSTRUCTIONS
     You MUST generate a response for the "${format}" channel ONLY.
-    Your response MUST STRICTLY follow the template for the ${format} format provided below. Do not add any other text, explanation, or preamble. Fill in the details based on the user's request, the conversation history, and the new context if provided.
+    Your response MUST STRICTLY follow the template for the ${format} format provided below. Do not add any other text, explanation, or preamble. Fill in the details based on the user's request and the conversation history.
 
     ## FORMAT: ${format}
     ### TEMPLATE:
@@ -176,17 +182,17 @@ const generateResponse = async (userQuery, format, combinedHistory, coreRules, i
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await ai.models.generateContentStream({
         model: 'gemini-2.5-flash',
         contents: fullPrompt,
     });
-    return response.text;
+    return response;
   } catch (error) {
     console.error("Error generating response from Gemini API:", error);
     if (error instanceof Error && (error.message.includes('API key not valid') || error.message.includes('API_KEY_INVALID'))) {
-        return "The provided API key is not valid. Please refresh the page to enter a new one.";
+        throw new Error("The provided API key is not valid. Please refresh the page to enter a new one.");
     }
-    return "Sorry, I encountered an error while processing your request. Please check the console for details.";
+    throw new Error("Sorry, I encountered an error while processing your request. Please check the console for details.");
   }
 };
 
@@ -277,24 +283,51 @@ const MarkdownRenderer = ({ text }) => {
     return <div className="prose prose-invert prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: formatText(text) }} />;
 };
 
-const Message = ({ message }) => {
+// FIX: Add rest props to satisfy TypeScript when a 'key' prop is provided.
+const Message = ({ message, ...props }) => {
+  const [isCopied, setIsCopied] = useState(false);
   const isAI = message.sender === 'ai';
   const avatarClass = isAI ? 'bg-indigo-600' : 'bg-green-500';
   const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  
+  const handleCopy = () => {
+      navigator.clipboard.writeText(message.text).then(() => {
+          setIsCopied(true);
+          setTimeout(() => setIsCopied(false), 2000);
+      });
+  };
 
   return (
-    <div className="flex items-start gap-3">
+    <div className="flex items-start gap-3 group">
       <div className={`w-9 h-9 ${avatarClass} rounded-md flex items-center justify-center font-bold text-lg flex-shrink-0`}>
         {message.avatar}
       </div>
-      <div className="flex-1">
+      <div className="flex-1 relative">
         <div className="flex items-baseline gap-2">
             <span className="font-bold text-white">{message.name}</span>
             <span className="text-xs text-gray-500">{time}</span>
         </div>
-        <div className="text-sm text-gray-300" style={{ whiteSpace: 'pre-wrap' }}>
+        <div className="text-sm text-gray-300 max-w-4xl" style={{ whiteSpace: 'pre-wrap' }}>
             <MarkdownRenderer text={message.text} />
         </div>
+        {isAI && (
+             <button
+                onClick={handleCopy}
+                title="Copy to clipboard"
+                aria-label="Copy message content to clipboard"
+                className="absolute top-0 right-0 p-1.5 bg-slate-700/60 rounded-md text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:bg-slate-600 hover:text-white"
+            >
+                {isCopied ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                )}
+            </button>
+        )}
       </div>
     </div>
   );
@@ -303,19 +336,38 @@ const Message = ({ message }) => {
 
 
 // --- Start of components/ChatWindow.tsx ---
-const ChatWindow = ({ messages, isLoading }) => {
+const ChatWindow = ({ messages, isLoading, activeChannel }) => {
   const endOfMessagesRef = useRef(null);
   
   useEffect(() => {
     endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+  
+  const showEmptyState = messages.length === 0 && !isLoading && activeChannel !== 'CR';
+  
+  const getChannelName = (channelId) => {
+    const format = FORMATS.find(f => f.id === channelId);
+    if (!format) return 'product-team';
+    return `${format.id.toLowerCase()}-${format.name.toLowerCase().replace(/\s+/g, '-')}`;
+  }
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
-      {/* FIX: Removed key prop to resolve static analysis error. This may cause React warnings. */}
-      {messages.map(msg => <Message message={msg} />)}
-      {isLoading && <TypingIndicator />}
-      <div ref={endOfMessagesRef} />
+    <div className="flex-1 overflow-y-auto p-4 md:p-6">
+      {showEmptyState ? (
+        <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
+            <div className="bg-slate-700/40 w-16 h-16 rounded-lg flex items-center justify-center mb-4">
+                 <span className="text-2xl font-bold text-gray-400">#</span>
+            </div>
+            <h3 className="text-xl font-bold text-gray-300">Welcome to #{getChannelName(activeChannel)}!</h3>
+            <p className="max-w-sm mt-2">{EMPTY_STATE_MESSAGES[activeChannel]}</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+            {messages.map(msg => <Message key={msg.id} message={msg} />)}
+            {isLoading && <TypingIndicator />}
+            <div ref={endOfMessagesRef} />
+        </div>
+      )}
     </div>
   );
 };
@@ -395,7 +447,6 @@ const MessageInput = ({ onSendMessage, onClearChat, onRegenerate, isLoading, act
     ? 'Refine rules with an instruction (e.g., "Make the tone friendlier")' 
     : `Message #${getChannelName(activeChannel)}`;
 
-  {/* FIX: Refactored ToolbarButton to accept props directly and provide default values for `disabled` and `onClick` to fix type errors. This avoids issues with linters that may not correctly handle prop destructuring for children. */}
   const ToolbarButton = (props) => (
     <button
         type="button"
@@ -477,12 +528,22 @@ const MessageInput = ({ onSendMessage, onClearChat, onRegenerate, isLoading, act
 
 
 // --- Start of components/Sidebar.tsx ---
-const Sidebar = ({ activeChannel, onSelectChannel }) => (
-    <aside className="w-64 bg-[#3f0e39] flex-shrink-0 flex flex-col">
-      <div className="h-12 flex items-center justify-between px-4 border-b border-r border-black/20">
+const Sidebar = ({ activeChannel, onSelectChannel, isCollapsed, onToggleCollapse }) => (
+    <aside className={`bg-[#3f0e39] flex-shrink-0 flex flex-col transition-all duration-300 ${isCollapsed ? 'w-0' : 'w-64'}`}>
+      <div className={`h-12 flex items-center justify-between px-4 border-b border-r border-black/20 flex-shrink-0 overflow-hidden ${isCollapsed ? 'opacity-0' : 'opacity-100'}`}>
         <h1 className="text-xl font-bold text-white">Gee</h1>
+        <button
+            onClick={onToggleCollapse}
+            className="text-gray-400 hover:bg-white/10 hover:text-white p-1 rounded-md"
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+        >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+            </svg>
+        </button>
       </div>
-      <div className="flex-1 overflow-y-auto pt-4 text-gray-300">
+      <div className={`flex-1 overflow-y-auto pt-4 text-gray-300 overflow-x-hidden ${isCollapsed ? 'opacity-0' : 'opacity-100'}`}>
         <div className="px-4 mb-4">
           <h2 className="text-sm font-semibold text-gray-400 opacity-70">Channels</h2>
           <ul className="mt-2 space-y-1">
@@ -491,15 +552,15 @@ const Sidebar = ({ activeChannel, onSelectChannel }) => (
                 const isActive = activeChannel === format.id;
                 return (
                     <li key={format.id} onClick={() => onSelectChannel(format.id)}
-                        className={`px-2 py-1 rounded cursor-pointer ${isActive ? 'bg-[#564399] text-white font-bold' : 'opacity-70 hover:bg-white/10'}`}
+                        className={`px-2 py-1 rounded cursor-pointer whitespace-nowrap ${isActive ? 'bg-[#564399] text-white font-bold' : 'opacity-70 hover:bg-white/10'}`}
                         title={format.description}>
                         <div className="flex items-center">
                            {format.id === 'CR' 
-                                ? <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                ? <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                   </svg>
-                                : <span className="w-4 text-center mr-2">#</span>
+                                : <span className="w-4 text-center mr-2 flex-shrink-0">#</span>
                             }
                             {channelName}
                         </div>
@@ -540,14 +601,15 @@ const Sidebar = ({ activeChannel, onSelectChannel }) => (
 
 
 // --- Start of components/ChatPanel.tsx ---
-const ChatPanel = ({ format, messages, isLoading, onSendMessage, onClearChat, onRegenerate, canRegenerate }) => {
+// FIX: Add rest props to satisfy TypeScript when a 'key' prop is provided.
+const ChatPanel = ({ format, messages, isLoading, onSendMessage, onClearChat, onRegenerate, canRegenerate, ...props }) => {
     const handleSend = (text) => onSendMessage(text, format);
     const handleClear = () => onClearChat(format);
     
     return (
         <div className="flex-1 flex flex-col border-l border-r border-black/20 min-w-0">
             <Header activeChannel={format} />
-            <ChatWindow messages={messages} isLoading={isLoading} />
+            <ChatWindow messages={messages} isLoading={isLoading} activeChannel={format} />
             <div className="px-4 pb-4 mt-auto">
                 <MessageInput 
                     onSendMessage={handleSend} 
@@ -710,6 +772,7 @@ const ApiKeyModal = ({ onApiKeySubmit }) => {
 // --- Start of App.tsx ---
 const App = () => {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key'));
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const handleApiKeyInvalid = () => {
     localStorage.removeItem('gemini_api_key');
@@ -754,46 +817,53 @@ const App = () => {
 
   const processGenerationRequest = useCallback(async (text, format, isNewContext) => {
     setIsLoading(true);
+    let currentAiMessageId = null;
 
-    const currentMessages = isNewContext ? [] : messages[format];
-    
-    const combinedHistory = FORMATS
-        .filter(f => f.id !== 'CR')
-        .map(f => {
-            const panelHistory = messages[f.id];
-            if (!panelHistory?.length) return `## Channel: ${f.name}\n(No messages yet)`;
-            return `## Channel: ${f.name}\n` + panelHistory.map(msg => `${msg.sender === 'ai' ? 'Gee' : 'User'}: ${msg.text}`).join('\n');
-        }).join('\n\n');
+    if (!isNewContext) {
+        const lastMessage = messages[format][messages[format].length - 1];
+        if (lastMessage && lastMessage.sender === 'ai') {
+            setMessages(prev => ({...prev, [format]: prev[format].slice(0, -1)}));
+        }
+    }
+
+    const channelHistory = messages[format]
+      .map(msg => `${msg.sender === 'ai' ? 'Gee' : 'User'}: ${msg.text}`)
+      .join('\n');
     
     try {
-      const aiResponseText = await generateResponse(text, format, combinedHistory, coreRules, isNewContext);
+      const stream = await generateResponseStream(text, format, channelHistory, coreRules, isNewContext);
       
-      if (aiResponseText.includes('API key is not valid')) {
-        handleApiKeyInvalid();
-      }
-
-      const aiMessage = {
-        id: (Date.now() + 1).toString(),
-        text: aiResponseText,
-        sender: 'ai',
-        name: "Gee",
-        avatar: 'G',
-      };
-
-      setMessages(prev => {
-        const currentChannelMessages = prev[format];
-        const lastMessageIsAi = currentChannelMessages.length > 0 && currentChannelMessages[currentChannelMessages.length - 1].sender === 'ai';
-        if (lastMessageIsAi && !isNewContext) {
-          const newChannelMessages = [...currentChannelMessages.slice(0, -1), aiMessage];
-          return { ...prev, [format]: newChannelMessages };
+      for await (const chunk of stream) {
+        const chunkText = chunk.text;
+        
+        if (currentAiMessageId === null) {
+          const aiMessage = {
+            id: (Date.now() + 1).toString(),
+            text: chunkText,
+            sender: 'ai',
+            name: "Gee",
+            avatar: 'G',
+          };
+          currentAiMessageId = aiMessage.id;
+          setMessages(prev => ({...prev, [format]: [...prev[format], aiMessage]}));
+        } else {
+          setMessages(prev => {
+            const newMessages = [...prev[format]];
+            const messageIndex = newMessages.findIndex(m => m.id === currentAiMessageId);
+            if (messageIndex > -1) {
+              newMessages[messageIndex].text += chunkText;
+            }
+            return {...prev, [format]: newMessages};
+          });
         }
-        return { ...prev, [format]: [...currentChannelMessages, aiMessage]};
-      });
-
+      }
     } catch (error) {
+       if (error.message.includes('API key is not valid')) {
+            handleApiKeyInvalid();
+       }
       const errorMessage = {
         id: (Date.now() + 1).toString(),
-        text: 'An error occurred while fetching the response. Please try again.',
+        text: error.message || 'An error occurred while fetching the response. Please try again.',
         sender: 'ai',
         name: "Gee",
         avatar: 'G',
@@ -821,7 +891,7 @@ const App = () => {
       name: 'User',
       avatar: 'U',
     };
-
+    
     setMessages(prev => ({
       ...prev,
       [format]: isNewContext ? [userMessage] : [...prev[format], userMessage],
@@ -841,33 +911,52 @@ const App = () => {
     }
   }, [canRegenerate, activePanel, lastUserPrompt, processGenerationRequest]);
 
-
   if (!apiKey) {
       return <ApiKeyModal onApiKeySubmit={handleApiKeySubmit} />;
   }
+  
+  const mainContent = activePanel === 'CR' ? (
+        <CoreRulesPanel 
+            initialRules={coreRules}
+            onSaveRules={setCoreRules}
+            onApiKeyInvalid={handleApiKeyInvalid}
+        />
+    ) : (
+        <ChatPanel 
+            key={activePanel}
+            format={activePanel}
+            messages={messages[activePanel]}
+            isLoading={isLoading}
+            onSendMessage={handleSendMessage}
+            onClearChat={handleClearChat}
+            onRegenerate={handleRegenerate}
+            canRegenerate={canRegenerate}
+        />
+    );
+
 
   return (
     <div className="flex h-screen bg-[#1a1d21] text-gray-300 font-sans">
-      <Sidebar activeChannel={activePanel} onSelectChannel={handleSelectChannel} />
+      <Sidebar 
+        activeChannel={activePanel} 
+        onSelectChannel={handleSelectChannel} 
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
+      />
+      {isSidebarCollapsed && (
+          <button 
+            onClick={() => setIsSidebarCollapsed(false)}
+            className="absolute top-2 left-2 z-10 text-gray-400 hover:bg-white/10 hover:text-white p-1 rounded-md"
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
+          >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+              </svg>
+          </button>
+      )}
       <main className="flex-1 flex overflow-x-auto">
-        {activePanel === 'CR' ? (
-            <CoreRulesPanel 
-                initialRules={coreRules}
-                onSaveRules={setCoreRules}
-                onApiKeyInvalid={handleApiKeyInvalid}
-            />
-        ) : (
-            // FIX: Removed key prop to resolve static analysis error. This may cause component state issues on channel switch.
-            <ChatPanel 
-                format={activePanel}
-                messages={messages[activePanel]}
-                isLoading={isLoading}
-                onSendMessage={handleSendMessage}
-                onClearChat={handleClearChat}
-                onRegenerate={handleRegenerate}
-                canRegenerate={canRegenerate}
-            />
-        )}
+        {mainContent}
       </main>
     </div>
   );
