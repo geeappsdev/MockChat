@@ -1,0 +1,888 @@
+
+
+// --- Imports ---
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { GoogleGenAI, Type } from '@google/genai';
+
+const { useState, useEffect, useCallback, useRef, StrictMode } = React;
+
+// --- Start of constants.ts ---
+const FORMATS = [
+  { id: 'EO', name: 'Email Outline', description: 'Full detailed email response with comprehensive analysis.' },
+  { id: 'CL', name: 'Concise List', description: 'Simplified outline in a structured list format.' },
+  { id: 'INV', name: 'Internal Note', description: 'Detailed internal checklist with specific fields.' },
+  { id: 'QS', name: 'Quick Summary', description: 'Brief summary focused on key points.' },
+  { id: 'CF', name: 'Consult Form', description: 'Structured format for consulting specific departments.' },
+  { id: 'CR', name: 'Core Rules', description: 'View and edit the AI\'s core rules and instructions.' },
+];
+
+const SYSTEM_PROMPT = `You are a helpful assistant for Gee, a senior, solution-oriented support agent at Stripe.
+Your mission is to generate accurate, empathetic, and well-structured support analyses and communication drafts for Gee to use.
+You must write all user-facing communication drafts from Gee's perspective, as if you were Gee. You are drafting the response FOR Gee.
+You must always use a warm, human-like, professional tone and prevent dissatisfaction (DSAT) through Positive Scripting and Never Blaming.
+`;
+
+const INITIAL_GENERAL_RULES = `
+# Core Persona & Voice
+- You are drafting messages on behalf of Gee, a human support agent. All user-facing text should be from Gee's perspective.
+- Your tone should be warm, human-like, and professional.
+- Use positive scripting. Focus on what can be done, not what can't. Avoid trigger words like "unfortunately" or "I can't".
+- Apply appropriate empathy based on the user's situation.
+
+# Content Rules:
+- Use simple, clear English without unnecessary technical jargon.
+- **Crucially, never mention the user's name in any output, even if it is provided in the input context.** Maintain user privacy.
+- When a chat transcript is provided, never mention the user's full name or email address.
+- Never blame users or third parties for issues.
+- Include a "Distressed User Analysis" in internal-facing formats.
+- Include relevant Stripe Dashboard links when appropriate to help the user.
+- Structure "To do" sections for clear, actionable next steps.
+
+# Link Guidelines
+- Only generate links from official Stripe domains: \`https://support.stripe.com/\` and \`https://docs.stripe.com/\`.
+- Place any user-provided links into the appropriate fields as they fit the format.
+- **Provide clean URLs. Do NOT wrap links in parentheses () or square brackets [].**
+
+# Formatting Guidelines:
+- Use bold for section titles (e.g., **Summary of the issue**).
+- Organize user-facing content in paragraphs, not bullet points.
+- Format emails with proper greetings and closings (using "Best, Gee").
+
+# Format-Specific Rules
+- For the CL (Concise List) format, the "Relevant documents" section must include links from your analysis and any links provided by the user.
+`;
+
+const FORMAT_DEFINITIONS = {
+  EO: `
+    **Case ID:**
+    **Summary of the issue:**
+    ----- EMAIL CONTENT BEGINS -----
+
+    ----- EMAIL CONTENT ENDS -----
+    **Analysis:**
+    **Steps I took:**
+    **Information in the reply must include:**
+    **Already know:**
+    **Need to know:**
+    **What the user need to do:**
+    **Outcome Summary:**
+    **DSAT analysis:**
+    **Distressed User Analysis:**
+    `,
+  CL: `
+    **Have you checked all related cases?:** YES
+    **Have you read through the entire thread?:** YES
+    **Summary of the issue:**
+    **Steps I took:**
+    **Relevant object IDs:**
+    **Final outcome:**
+    **Relevant documents:**
+    **Distressed User Analysis:**
+    **Speculation:**
+    **Why is the case open/pending:**
+    `,
+  INV: `
+    **Internal Note checklist**
+    **Consent to be recorded:**
+    **Authentication/Verification PIN/PII?:**
+    **User-Account Type:**
+    **User-Account ID:**
+    **Have you checked all related cases?**
+    **Have you read through the entire thread?**
+    **List all user's concerns/inquiries**
+    **Topic:**
+    **Summary of the issue:**
+    **Steps I took:**
+    **Check Lumos (RP used):**
+    **Check Confluence:**
+    **Specific Dashboard link:**
+    **Check Public Documentation:**
+    **Final Outcome:**
+    **Why is the case open/pending:**
+    **Distressed User Analysis:**
+    **Information the reply must include:**
+    `,
+  QS: `
+    **Summary of the issue:**
+    **Case link:**
+    **Case ID:**
+    **Account ID:**
+    **User-Account ID Platform:**
+    **User-Account ID Connected Account:**
+    **Speculation:**
+    **What Can I tell the user?:**
+    **Relevant Stripe resources:**
+    **Relevant IDs:**
+    **Distressed User Analysis:**
+    `,
+  CF: `
+    **Consult[Department]:** (Platinum/ALO/US/RISK/SaaS) (Chat/RAC)
+    **Ticket Link:**
+    **Object/Account ID(s):**
+    **User issue Summary:** (2-3 sentences)
+    **Your Investigation:** (2-3 sentences)
+    **Speculation:** (2-3 sentences)
+    `,
+  CR: `This is not a generation format. This channel is for displaying and updating your core rules.`
+};
+// --- End of constants.ts ---
+
+
+// --- Start of services/geminiService.ts ---
+let ai;
+
+const initAi = (apiKey) => {
+  if (apiKey) {
+    ai = new GoogleGenAI({ apiKey });
+  } else {
+    ai = undefined;
+  }
+};
+
+const generateResponse = async (userQuery, format, combinedHistory, coreRules, isNewContext) => {
+  if (!ai) {
+    return "API key has not been initialized. Please provide an API key.";
+  }
+
+  const formatTemplate = FORMAT_DEFINITIONS[format];
+  
+  const historyForPrompt = isNewContext 
+    ? `The user has started a new context. IGNORE all previous conversation history. The new context is:\n\n"${userQuery}"`
+    : `# CONVERSATION HISTORY (from all channels)\nThis is the recent conversation history. Use it for context.\n${combinedHistory}`;
+
+  const fullPrompt = `
+    ${SYSTEM_PROMPT}
+
+    # CORE RULES
+    You MUST follow these rules for all responses.
+    ${coreRules}
+    ---
+
+    ${historyForPrompt}
+    ---
+
+    # NEW USER REQUEST
+    The user has just sent the following message in the "${format}" channel:
+    "${userQuery}"
+
+    # RESPONSE INSTRUCTIONS
+    You MUST generate a response for the "${format}" channel ONLY.
+    Your response MUST STRICTLY follow the template for the ${format} format provided below. Do not add any other text, explanation, or preamble. Fill in the details based on the user's request, the conversation history, and the new context if provided.
+
+    ## FORMAT: ${format}
+    ### TEMPLATE:
+    ${formatTemplate}
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: fullPrompt,
+    });
+    return response.text;
+  } catch (error) {
+    console.error("Error generating response from Gemini API:", error);
+    if (error instanceof Error && (error.message.includes('API key not valid') || error.message.includes('API_KEY_INVALID'))) {
+        return "The provided API key is not valid. Please refresh the page to enter a new one.";
+    }
+    return "Sorry, I encountered an error while processing your request. Please check the console for details.";
+  }
+};
+
+const generateUpdatedRules = async (userInstruction, currentRules) => {
+    if (!ai) {
+        return { error: "API key has not been initialized." };
+    }
+    
+    const RULES_UPDATER_PROMPT = `You are an AI assistant that helps a user update your own core operational rules. The user will provide an instruction to change the rules. Your task is to generate a JSON object containing two keys: "confirmationMessage" and "updatedRules".
+- "confirmationMessage": A brief, friendly message confirming the update.
+- "updatedRules": The complete, new set of rules that incorporates the user's instruction. Ensure the new rules are well-formatted and maintain the original structure.`;
+
+    const fullPrompt = `Update the following rules based on my instruction.
+
+# CURRENT RULES
+${currentRules}
+
+# MY INSTRUCTION
+"${userInstruction}"
+`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: fullPrompt,
+            config: {
+                systemInstruction: RULES_UPDATER_PROMPT,
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        confirmationMessage: {
+                            type: Type.STRING,
+                            description: 'A brief, friendly message confirming the update.'
+                        },
+                        updatedRules: {
+                            type: Type.STRING,
+                            description: 'The complete, new set of rules.'
+                        },
+                    },
+                    required: ["confirmationMessage", "updatedRules"],
+                },
+            },
+        });
+        const jsonText = response.text.trim();
+        const sanitizedJson = jsonText.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+        return JSON.parse(sanitizedJson);
+    } catch (error) {
+        console.error("Error generating updated rules:", error);
+        if (error instanceof Error && (error.message.includes('API key not valid') || error.message.includes('API_KEY_INVALID'))) {
+            return { error: "The provided API key is not valid. Please refresh the page to enter a new one." };
+        }
+        return { error: "Sorry, I encountered an error while updating the rules. Please check the console for details." };
+    }
+};
+// --- End of services/geminiService.ts ---
+
+
+// --- Start of components/TypingIndicator.tsx ---
+const TypingIndicator = () => (
+    <div className="flex items-start gap-3">
+      <div className="w-9 h-9 bg-indigo-600 rounded-md flex items-center justify-center font-bold text-lg flex-shrink-0">G</div>
+      <div className="flex-1 pt-4">
+        <div className="bg-[#222529] rounded-lg p-3 inline-block">
+          <div className="flex items-center space-x-1">
+            <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.3s]"></div>
+            <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.15s]"></div>
+            <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+);
+// --- End of components/TypingIndicator.tsx ---
+
+
+// --- Start of components/Message.tsx ---
+const MarkdownRenderer = ({ text }) => {
+    const formatText = (inputText) => {
+        const urlRegex = /[\[\(]?https?:\/\/[^\s)\]]+[\]\)]?/g;
+        let formattedText = inputText.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-white">$1</strong>');
+        formattedText = formattedText.replace(urlRegex, (match) => {
+            const cleanUrl = match.replace(/[\[\]()]/g, '');
+            return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">${cleanUrl}</a>`;
+        });
+        return formattedText;
+    };
+    return <div className="prose prose-invert prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: formatText(text) }} />;
+};
+
+const Message = ({ message }) => {
+  const isAI = message.sender === 'ai';
+  const avatarClass = isAI ? 'bg-indigo-600' : 'bg-green-500';
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <div className="flex items-start gap-3">
+      <div className={`w-9 h-9 ${avatarClass} rounded-md flex items-center justify-center font-bold text-lg flex-shrink-0`}>
+        {message.avatar}
+      </div>
+      <div className="flex-1">
+        <div className="flex items-baseline gap-2">
+            <span className="font-bold text-white">{message.name}</span>
+            <span className="text-xs text-gray-500">{time}</span>
+        </div>
+        <div className="text-sm text-gray-300" style={{ whiteSpace: 'pre-wrap' }}>
+            <MarkdownRenderer text={message.text} />
+        </div>
+      </div>
+    </div>
+  );
+};
+// --- End of components/Message.tsx ---
+
+
+// --- Start of components/ChatWindow.tsx ---
+const ChatWindow = ({ messages, isLoading }) => {
+  const endOfMessagesRef = useRef(null);
+  
+  useEffect(() => {
+    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
+      {/* FIX: Removed key prop to resolve static analysis error. This may cause React warnings. */}
+      {messages.map(msg => <Message message={msg} />)}
+      {isLoading && <TypingIndicator />}
+      <div ref={endOfMessagesRef} />
+    </div>
+  );
+};
+// --- End of components/ChatWindow.tsx ---
+
+
+// --- Start of components/Header.tsx ---
+const Header = ({ activeChannel }) => {
+  const getChannelName = (channelId) => {
+    const format = FORMATS.find(f => f.id === channelId);
+    if (!format) return 'product-team';
+    return `${format.id.toLowerCase()}-${format.name.toLowerCase().replace(/\s+/g, '-')}`;
+  }
+  return (
+    <header className="flex items-center justify-between p-3 border-b border-gray-700/50 shadow-sm flex-shrink-0 h-12">
+      <div>
+        <h2 className="text-lg font-bold text-white flex items-center">
+          {activeChannel === 'CR' ? (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+          ) : <span className="mr-1">#</span>} 
+          {getChannelName(activeChannel)}
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-1 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+          </svg>
+        </h2>
+      </div>
+    </header>
+  );
+};
+// --- End of components/Header.tsx ---
+
+
+// --- Start of components/MessageInput.tsx ---
+const MessageInput = ({ onSendMessage, onClearChat, onRegenerate, isLoading, activeChannel, canRegenerate }) => {
+  const [text, setText] = useState('');
+  const textareaRef = useRef(null);
+  
+  const getChannelName = (channelId) => {
+    const format = FORMATS.find(f => f.id === channelId);
+    if (!format) return 'product-team';
+    return `${format.id.toLowerCase()}-${format.name.toLowerCase().replace(/\s+/g, '-')}`;
+  }
+
+  const handleSubmit = () => {
+    if (text.trim() && !isLoading) {
+      onSendMessage(text);
+      setText('');
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  };
+  
+  const handleRegenerate = () => {
+    if (!isLoading && canRegenerate) {
+      onRegenerate();
+    }
+  }
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      const scrollHeight = textareaRef.current.scrollHeight;
+      const maxHeight = 240; 
+      textareaRef.current.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
+    }
+  }, [text]);
+
+  const placeholder = activeChannel === 'CR' 
+    ? 'Refine rules with an instruction (e.g., "Make the tone friendlier")' 
+    : `Message #${getChannelName(activeChannel)}`;
+
+  {/* FIX: Refactored ToolbarButton to accept props directly and provide default values for `disabled` and `onClick` to fix type errors. This avoids issues with linters that may not correctly handle prop destructuring for children. */}
+  const ToolbarButton = (props) => (
+    <button
+        type="button"
+        className="w-7 h-7 flex-shrink-0 text-gray-400 rounded-md flex items-center justify-center transition-all duration-200 disabled:text-gray-500/80 disabled:cursor-not-allowed enabled:hover:bg-white/10 enabled:hover:text-gray-200"
+        aria-label={props.ariaLabel}
+        title={props.title}
+        disabled={props.disabled ?? true}
+        onClick={props.onClick ?? (() => {})}
+    >
+        {props.children}
+    </button>
+  );
+
+  return (
+    <div className="bg-[#222529] border border-gray-600/70 rounded-lg flex flex-col">
+      <div className="p-2 border-b border-gray-700/60 flex items-center flex-wrap gap-x-2 gap-y-1">
+        <ToolbarButton ariaLabel="Bold" title="Bold"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 4a2 2 0 012-2h6a2 2 0 012 2v2.5a.5.5 0 01-1 0V4H6v12h5.5a.5.5 0 010 1H6a2 2 0 01-2-2V4zm11.5 6a3.5 3.5 0 11-3.5 3.5.5.5 0 011 0 2.5 2.5 0 100-5 .5.5 0 010-1z" clipRule="evenodd" /></svg></ToolbarButton>
+        <ToolbarButton ariaLabel="Italic" title="Italic"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M7.707 3.707a1 1 0 011.066-.943h.001l5.866 2.133a1 1 0 01.53 1.28l-5.866 10.134a1 1 0 01-1.28.53l-5.866-2.134a1 1 0 01-.53-1.28L7.434 3.237a1 1 0 01.273-.473zm1.141 1.015L4.42 12.98l4.42-1.606-1.016-4.22z" /></svg></ToolbarButton>
+        <ToolbarButton ariaLabel="Underline" title="Underline"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M5.5 3a.5.5 0 00-1 0v8a5.5 5.5 0 0011 0V3a.5.5 0 00-1 0v8a4.5 4.5 0 01-9 0V3z" /><path d="M4 15.5a.5.5 0 000 1h12a.5.5 0 000-1H4z" /></svg></ToolbarButton>
+        <ToolbarButton ariaLabel="Strikethrough" title="Strikethrough"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16 10a1 1 0 01-1 1H5a1 1 0 110-2h10a1 1 0 011 1zm-1-6a1 1 0 00-1-1h-2.586a1 1 0 00-.707.293l-1.414 1.414C9.122 6.878 8.84 8 7.5 8 6.16 8 5.5 6.204 5.5 6c0-.552.448-1 1-1h1.5a1 1 0 100-2H6.5a3 3 0 00-3 3c0 .828.672 1.5 1.5 1.5.833 0 1.5-.955 2-1.667l1.414-1.414A1 1 0 0010.414 7H14a1 1 0 001-1V5z" clipRule="evenodd" /></svg></ToolbarButton>
+        <div className="w-px h-5 bg-gray-700/60 mx-1"></div>
+        <ToolbarButton ariaLabel="Link" title="Link"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z" clipRule="evenodd" /></svg></ToolbarButton>
+        <div className="w-px h-5 bg-gray-700/60 mx-1"></div>
+        <ToolbarButton ariaLabel="Numbered list" title="Numbered list"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 4a1 1 0 00-2 0v1.5a.5.5 0 001 0V5h1a.5.5 0 000-1H4a1 1 0 00-1 1v.5a.5.5 0 001 0V6h1a.5.5 0 000-1zM3 9.5a.5.5 0 01.5-.5h1a.5.5 0 010 1h-.5V11h.5a.5.5 0 010 1h-1a.5.5 0 01-.5-.5v-1.5zm2 5.5a1 1 0 00-1.414-1.414L2 15.172V14.5a.5.5 0 00-1 0v2.5a.5.5 0 00.5.5h2.5a.5.5 0 000-1H2.828l1.768-1.768A1 1 0 005 15.5zM7 5h10a1 1 0 110 2H7a1 1 0 110-2zm0 5h10a1 1 0 110 2H7a1 1 0 110-2zm0 5h10a1 1 0 110 2H7a1 1 0 110-2z" clipRule="evenodd" /></svg></ToolbarButton>
+        <ToolbarButton ariaLabel="Bulleted list" title="Bulleted list"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M2 5a1 1 0 00-1 1v1a1 1 0 001 1h1a1 1 0 001-1V6a1 1 0 00-1-1H2zm0 6a1 1 0 00-1 1v1a1 1 0 001 1h1a1 1 0 001-1v-1a1 1 0 00-1-1H2zm0 6a1 1 0 00-1 1v1a1 1 0 001 1h1a1 1 0 001-1v-1a1 1 0 00-1-1H2zM7 5h10a1 1 0 110 2H7a1 1 0 110-2zm0 6h10a1 1 0 110 2H7a1 1 0 110-2zm0 6h10a1 1 0 110 2H7a1 1 0 110-2z" clipRule="evenodd" /></svg></ToolbarButton>
+        <div className="w-px h-5 bg-gray-700/60 mx-1"></div>
+        <ToolbarButton ariaLabel="Code" title="Code"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M6.646 3.646a.5.5 0 01.708 0l6 6a.5.5 0 010 .708l-6 6a.5.5 0 01-.708-.708L12.293 10 6.646 4.354a.5.5 0 010-.708z" clipRule="evenodd" /><path fillRule="evenodd" d="M2.646 9.646a.5.5 0 01.708 0L7 13.293l4.646-4.647a.5.5 0 01.708.708l-5 5a.5.5 0 01-.708 0l-5-5a.5.5 0 010-.708z" clipRule="evenodd" /></svg></ToolbarButton>
+        <ToolbarButton ariaLabel="Code block" title="Code block"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" /></svg></ToolbarButton>
+      </div>
+      <div className="px-3 pt-2 pb-1">
+         <textarea
+          ref={textareaRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          rows={1}
+          className="flex-1 bg-transparent border-none focus:ring-0 resize-none placeholder-gray-500 text-gray-200 text-sm w-full p-0 m-0"
+          style={{ caretColor: '#f3f3f3', minHeight: '24px' }}
+          disabled={isLoading}
+        />
+      </div>
+      <div className="px-2 pb-2 flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          {activeChannel !== 'CR' && 
+            <>
+                <ToolbarButton onClick={onClearChat} disabled={isLoading} ariaLabel="Clear chat for new context" title="Clear chat for new context"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg></ToolbarButton>
+                <div className="w-px h-5 bg-gray-700/60 mx-1"></div>
+            </>
+          }
+          <ToolbarButton ariaLabel="Add attachment" title="Add attachment"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg></ToolbarButton>
+          <ToolbarButton ariaLabel="Emoji" title="Emoji"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 100-2 1 1 0 000 2zm7-1a1 1 0 11-2 0 1 1 0 012 0zm-7.536 5.879a.75.75 0 001.072.015 3.5 3.5 0 014.928 0 .75.75 0 101.072-1.072A5 5 0 006.464 12.8a.75.75 0 00.015 1.072z" clipRule="evenodd" /></svg></ToolbarButton>
+          <ToolbarButton ariaLabel="Mention" title="Mention"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M6.25 6.375a4.125 4.125 0 118.25 0 4.125 4.125 0 01-8.25 0zM3.125 6.375a3.125 3.125 0 116.25 0 3.125 3.125 0 01-6.25 0zM13.875 14.375a4.125 4.125 0 118.25 0 4.125 4.125 0 01-8.25 0zM10.75 14.375a3.125 3.125 0 116.25 0 3.125 3.125 0 01-6.25 0z" /></svg></ToolbarButton>
+        </div>
+        <div className="flex items-center gap-1">
+            {activeChannel !== 'CR' &&
+                <ToolbarButton onClick={handleRegenerate} disabled={isLoading || !canRegenerate} ariaLabel="Regenerate response" title="Regenerate response"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M15.312 11.312a4.5 4.5 0 01-7.994 2.228.75.75 0 011.23-.756A3 3 0 1012 9V8a.75.75 0 011.5 0v2.312z" clipRule="evenodd" /><path d="M13.5 6a.75.75 0 01-.75.75h-3a.75.75 0 010-1.5h3a.75.75 0 01.75.75z" /><path fillRule="evenodd" d="M7.504 4.332A4.502 4.502 0 0112 4.5a4.5 4.5 0 014.5 4.5v.5a.75.75 0 01-1.5 0v-.5a3 3 0 00-3-3H8.75a.75.75 0 01-.75-.75V3.5a.75.75 0 01.55-.72l.004-.001z" clipRule="evenodd" /></svg></ToolbarButton>
+            }
+          <button
+              onClick={handleSubmit}
+              disabled={isLoading || !text.trim()}
+              className="w-8 h-8 flex-shrink-0 text-gray-300 rounded-md flex items-center justify-center transition-all duration-200 disabled:text-gray-500/80 disabled:cursor-not-allowed enabled:hover:bg-white/10"
+              aria-label={activeChannel === 'CR' ? 'Refine with AI' : 'Send message'}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.428A1 1 0 009.894 15V4.106A1 1 0 0010.894 2.553z" /></svg>
+          </button>
+          <div className="w-px h-5 bg-gray-700/60 mx-1"></div>
+          <ToolbarButton ariaLabel="More send options" title="More send options">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </ToolbarButton>
+        </div>
+      </div>
+    </div>
+  );
+};
+// --- End of components/MessageInput.tsx ---
+
+
+// --- Start of components/Sidebar.tsx ---
+const Sidebar = ({ activeChannel, onSelectChannel }) => (
+    <aside className="w-64 bg-[#3f0e39] flex-shrink-0 flex flex-col">
+      <div className="h-12 flex items-center justify-between px-4 border-b border-r border-black/20">
+        <h1 className="text-xl font-bold text-white">Gee</h1>
+      </div>
+      <div className="flex-1 overflow-y-auto pt-4 text-gray-300">
+        <div className="px-4 mb-4">
+          <h2 className="text-sm font-semibold text-gray-400 opacity-70">Channels</h2>
+          <ul className="mt-2 space-y-1">
+            {FORMATS.map(format => {
+                const channelName = `${format.id.toLowerCase()}-${format.name.toLowerCase().replace(/\s+/g, '-')}`;
+                const isActive = activeChannel === format.id;
+                return (
+                    <li key={format.id} onClick={() => onSelectChannel(format.id)}
+                        className={`px-2 py-1 rounded cursor-pointer ${isActive ? 'bg-[#564399] text-white font-bold' : 'opacity-70 hover:bg-white/10'}`}
+                        title={format.description}>
+                        <div className="flex items-center">
+                           {format.id === 'CR' 
+                                ? <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  </svg>
+                                : <span className="w-4 text-center mr-2">#</span>
+                            }
+                            {channelName}
+                        </div>
+                    </li>
+                )
+            })}
+            <li className="px-2 py-1 rounded opacity-50 cursor-not-allowed"><div className="flex items-center"><span className="w-4 text-center mr-2">#</span> general</div></li>
+            <li className="px-2 py-1 rounded opacity-50 cursor-not-allowed"><div className="flex items-center"><span className="w-4 text-center mr-2">#</span> product-updates</div></li>
+            <li className="px-2 py-1 rounded opacity-50 cursor-not-allowed"><div className="flex items-center"><span className="w-4 text-center mr-2">#</span> support-lounge</div></li>
+            <li className="px-2 py-1 rounded opacity-50 cursor-not-allowed"><div className="flex items-center"><span className="w-4 text-center mr-2">#</span> random</div></li>
+            <li className="px-2 py-1 rounded opacity-50 cursor-not-allowed"><div className="flex items-center"><span className="w-4 text-center mr-2">#</span> all-hands</div></li>
+          </ul>
+        </div>
+        <div className="px-4 mt-8">
+            <h2 className="text-sm font-semibold text-gray-400 opacity-70">Apps</h2>
+             <ul className="mt-2 space-y-1">
+                <li className="px-2 py-0.5 rounded flex items-center gap-2 opacity-70">
+                    <div className="w-5 h-5 bg-indigo-600 rounded-md flex items-center justify-center font-bold text-sm flex-shrink-0">G</div> Gee
+                </li>
+                 <li className="px-2 py-0.5 rounded flex items-center gap-2 opacity-50 cursor-not-allowed">
+                    <div className="w-5 h-5 bg-yellow-500 rounded-md flex-shrink-0"></div> Google Calendar
+                </li>
+                 <li className="px-2 py-0.5 rounded flex items-center gap-2 opacity-50 cursor-not-allowed">
+                    <div className="w-5 h-5 bg-blue-500 rounded-md flex-shrink-0"></div> Jira
+                </li>
+                 <li className="px-2 py-0.5 rounded flex items-center gap-2 opacity-50 cursor-not-allowed">
+                    <div className="w-5 h-5 bg-pink-500 rounded-md flex-shrink-0"></div> Figma
+                </li>
+                 <li className="px-2 py-0.5 rounded flex items-center gap-2 opacity-50 cursor-not-allowed">
+                    <div className="w-5 h-5 bg-green-500 rounded-md flex-shrink-0"></div> Google Drive
+                </li>
+            </ul>
+        </div>
+      </div>
+    </aside>
+);
+// --- End of components/Sidebar.tsx ---
+
+
+// --- Start of components/ChatPanel.tsx ---
+const ChatPanel = ({ format, messages, isLoading, onSendMessage, onClearChat, onRegenerate, canRegenerate }) => {
+    const handleSend = (text) => onSendMessage(text, format);
+    const handleClear = () => onClearChat(format);
+    
+    return (
+        <div className="flex-1 flex flex-col border-l border-r border-black/20 min-w-0">
+            <Header activeChannel={format} />
+            <ChatWindow messages={messages} isLoading={isLoading} />
+            <div className="px-4 pb-4 mt-auto">
+                <MessageInput 
+                    onSendMessage={handleSend} 
+                    onClearChat={handleClear}
+                    onRegenerate={onRegenerate}
+                    isLoading={isLoading} 
+                    activeChannel={format} 
+                    canRegenerate={canRegenerate}
+                />
+            </div>
+        </div>
+    );
+};
+// --- End of components/ChatPanel.tsx ---
+
+// --- Start of components/CoreRulesPanel.tsx ---
+const CoreRulesPanel = ({ initialRules, onSaveRules, onApiKeyInvalid }) => {
+    const [editedRules, setEditedRules] = useState(initialRules);
+    const [isLoading, setIsLoading] = useState(false);
+    const [showToast, setShowToast] = useState('');
+
+    const handleAiRefine = async (instruction) => {
+        if (!instruction.trim() || isLoading) return;
+        setIsLoading(true);
+
+        const result = await generateUpdatedRules(instruction, editedRules);
+
+        if (result.error) {
+            alert(result.error);
+             if (result.error.includes('API key is not valid')) {
+                onApiKeyInvalid();
+            }
+        } else {
+            setEditedRules(result.updatedRules);
+            setShowToast(result.confirmationMessage);
+            setTimeout(() => setShowToast(''), 4000);
+        }
+        setIsLoading(false);
+    };
+
+    const handleSave = () => {
+        onSaveRules(editedRules);
+        setShowToast('Rules saved successfully!');
+        setTimeout(() => setShowToast(''), 3000);
+    };
+    
+    const handleReset = () => {
+        if(window.confirm("Are you sure you want to reset the rules to their default state? Any unsaved changes will be lost.")) {
+            setEditedRules(INITIAL_GENERAL_RULES);
+        }
+    };
+
+    const hasChanges = editedRules !== initialRules;
+
+    return (
+        <div className="relative flex-1 flex flex-col border-l border-r border-black/20 min-w-0">
+            <Header activeChannel={'CR'} />
+            <div className="flex-1 flex flex-col p-4 md:p-6 space-y-4 overflow-y-auto">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                    <p className="text-gray-400 text-sm max-w-lg">
+                        These core instructions guide the AI for all generated responses. Edit them directly or use the input below to refine them with AI.
+                    </p>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        <button 
+                            onClick={handleReset}
+                            className="px-3 py-1.5 text-sm font-semibold text-gray-300 bg-slate-700/60 rounded-md hover:bg-slate-700 transition-colors"
+                        >
+                            Reset to Default
+                        </button>
+                        <button
+                            onClick={handleSave}
+                            disabled={!hasChanges || isLoading}
+                            className="px-3 py-1.5 text-sm font-semibold text-white bg-indigo-600 rounded-md hover:bg-indigo-700 transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed"
+                        >
+                            Save Changes
+                        </button>
+                    </div>
+                </div>
+                <textarea
+                    value={editedRules}
+                    onChange={(e) => setEditedRules(e.target.value)}
+                    className="w-full flex-1 bg-[#222529] border border-gray-600/70 rounded-lg p-4 font-mono text-sm text-gray-300 resize-none focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    spellCheck="false"
+                    disabled={isLoading}
+                />
+            </div>
+
+            <div className="px-4 pb-4 mt-auto">
+                <MessageInput 
+                    onSendMessage={handleAiRefine}
+                    isLoading={isLoading}
+                    activeChannel={'CR'}
+                    onClearChat={() => {}} 
+                    onRegenerate={() => {}}
+                    canRegenerate={false}
+                />
+            </div>
+            {/* Save Confirmation Toast */}
+            {showToast && (
+                <div className="absolute bottom-24 right-6 bg-green-600 text-white text-sm py-2 px-4 rounded-lg shadow-lg transition-opacity duration-300 animate-bounce">
+                    {showToast}
+                </div>
+            )}
+        </div>
+    );
+};
+// --- End of components/CoreRulesPanel.tsx ---
+
+
+// --- Start of components/ApiKeyModal.tsx ---
+const ApiKeyModal = ({ onApiKeySubmit }) => {
+  const [apiKey, setApiKey] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!apiKey.trim()) {
+      setError('API Key cannot be empty.');
+      return;
+    }
+    setError('');
+    onApiKeySubmit(apiKey.trim());
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900 bg-opacity-95 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 p-8 rounded-lg shadow-xl w-full max-w-md border border-slate-700">
+        <h2 className="text-2xl font-bold text-white mb-2">Gemini API Key Required</h2>
+        <p className="text-gray-400 mb-6">
+          Please enter your API key to use the AI Support Assistant. You can get your key from{' '}
+          <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+            Google AI Studio
+          </a>.
+        </p>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="Enter your API key here"
+            className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            autoFocus
+          />
+          {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
+          <button
+            type="submit"
+            disabled={!apiKey.trim()}
+            className="w-full mt-6 bg-indigo-600 text-white font-bold py-2.5 px-4 rounded-md hover:bg-indigo-700 transition-colors disabled:bg-slate-600 disabled:cursor-not-allowed"
+          >
+            Start Session
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+// --- End of components/ApiKeyModal.tsx ---
+
+
+// --- Start of App.tsx ---
+const App = () => {
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key'));
+
+  const handleApiKeyInvalid = () => {
+    localStorage.removeItem('gemini_api_key');
+    setApiKey(null);
+  };
+  
+  useEffect(() => {
+    if (apiKey) {
+      localStorage.setItem('gemini_api_key', apiKey);
+      initAi(apiKey);
+    }
+  }, [apiKey]);
+
+  const handleApiKeySubmit = (key) => {
+    setApiKey(key);
+  };
+  
+  const [coreRules, setCoreRules] = useState(INITIAL_GENERAL_RULES);
+  const [lastUserPrompt, setLastUserPrompt] = useState({});
+  const [isNewContextMode, setIsNewContextMode] = useState({});
+
+  const initialMessages = FORMATS.reduce((acc, format) => {
+    if (format.id !== 'CR') {
+      acc[format.id] = [];
+    }
+    return acc;
+  }, {});
+  
+  const [messages, setMessages] = useState(initialMessages);
+  const [activePanel, setActivePanel] = useState('EO');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSelectChannel = useCallback((channel) => setActivePanel(channel), []);
+
+  const handleClearChat = useCallback((format) => {
+    setMessages(prev => ({ ...prev, [format]: [] }));
+    setIsNewContextMode(prev => ({ ...prev, [format]: true }));
+    setLastUserPrompt(prev => ({...prev, [format]: null }));
+  }, []);
+  
+  const canRegenerate = !isLoading && activePanel !== 'CR' && lastUserPrompt[activePanel];
+
+  const processGenerationRequest = useCallback(async (text, format, isNewContext) => {
+    setIsLoading(true);
+
+    const currentMessages = isNewContext ? [] : messages[format];
+    
+    const combinedHistory = FORMATS
+        .filter(f => f.id !== 'CR')
+        .map(f => {
+            const panelHistory = messages[f.id];
+            if (!panelHistory?.length) return `## Channel: ${f.name}\n(No messages yet)`;
+            return `## Channel: ${f.name}\n` + panelHistory.map(msg => `${msg.sender === 'ai' ? 'Gee' : 'User'}: ${msg.text}`).join('\n');
+        }).join('\n\n');
+    
+    try {
+      const aiResponseText = await generateResponse(text, format, combinedHistory, coreRules, isNewContext);
+      
+      if (aiResponseText.includes('API key is not valid')) {
+        handleApiKeyInvalid();
+      }
+
+      const aiMessage = {
+        id: (Date.now() + 1).toString(),
+        text: aiResponseText,
+        sender: 'ai',
+        name: "Gee",
+        avatar: 'G',
+      };
+
+      setMessages(prev => {
+        const currentChannelMessages = prev[format];
+        const lastMessageIsAi = currentChannelMessages.length > 0 && currentChannelMessages[currentChannelMessages.length - 1].sender === 'ai';
+        if (lastMessageIsAi && !isNewContext) {
+          const newChannelMessages = [...currentChannelMessages.slice(0, -1), aiMessage];
+          return { ...prev, [format]: newChannelMessages };
+        }
+        return { ...prev, [format]: [...currentChannelMessages, aiMessage]};
+      });
+
+    } catch (error) {
+      const errorMessage = {
+        id: (Date.now() + 1).toString(),
+        text: 'An error occurred while fetching the response. Please try again.',
+        sender: 'ai',
+        name: "Gee",
+        avatar: 'G',
+      };
+      setMessages(prev => ({
+        ...prev,
+        [format]: [...prev[format], errorMessage]
+      }));
+    } finally {
+      setIsLoading(false);
+      setIsNewContextMode(prev => ({ ...prev, [format]: false }));
+    }
+  }, [messages, coreRules]);
+
+
+  const handleSendMessage = useCallback(async (text, format) => {
+    if (!text.trim() || isLoading) return;
+
+    const isNewContext = !!isNewContextMode[format];
+
+    const userMessage = {
+      id: Date.now().toString(),
+      text,
+      sender: 'user',
+      name: 'User',
+      avatar: 'U',
+    };
+
+    setMessages(prev => ({
+      ...prev,
+      [format]: isNewContext ? [userMessage] : [...prev[format], userMessage],
+    }));
+
+    setLastUserPrompt(prev => ({...prev, [format]: text }));
+
+    await processGenerationRequest(text, format, isNewContext);
+
+  }, [isLoading, isNewContextMode, processGenerationRequest]);
+
+  const handleRegenerate = useCallback(async () => {
+    if (!canRegenerate) return;
+    const lastPrompt = lastUserPrompt[activePanel];
+    if (lastPrompt) {
+      await processGenerationRequest(lastPrompt, activePanel, false);
+    }
+  }, [canRegenerate, activePanel, lastUserPrompt, processGenerationRequest]);
+
+
+  if (!apiKey) {
+      return <ApiKeyModal onApiKeySubmit={handleApiKeySubmit} />;
+  }
+
+  return (
+    <div className="flex h-screen bg-[#1a1d21] text-gray-300 font-sans">
+      <Sidebar activeChannel={activePanel} onSelectChannel={handleSelectChannel} />
+      <main className="flex-1 flex overflow-x-auto">
+        {activePanel === 'CR' ? (
+            <CoreRulesPanel 
+                initialRules={coreRules}
+                onSaveRules={setCoreRules}
+                onApiKeyInvalid={handleApiKeyInvalid}
+            />
+        ) : (
+            // FIX: Removed key prop to resolve static analysis error. This may cause component state issues on channel switch.
+            <ChatPanel 
+                format={activePanel}
+                messages={messages[activePanel]}
+                isLoading={isLoading}
+                onSendMessage={handleSendMessage}
+                onClearChat={handleClearChat}
+                onRegenerate={handleRegenerate}
+                canRegenerate={canRegenerate}
+            />
+        )}
+      </main>
+    </div>
+  );
+};
+// --- End of App.tsx ---
+
+
+// --- Start of index.tsx ---
+const rootElement = document.getElementById('root');
+if (rootElement) {
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(
+        <StrictMode>
+            <App />
+        </StrictMode>
+    );
+}
+// --- End of index.tsx ---
