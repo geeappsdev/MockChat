@@ -55,6 +55,7 @@
     # Content Rules:
     - Use simple, clear English without unnecessary technical jargon.
     - **Crucially, never mention the user's name in any output, even if it is provided in the input context.** Maintain user privacy.
+    - When a chat transcript is provided, never mention the user's full name or email address.
     - Never blame users or third parties for issues.
     - Include a "Distressed User Analysis" in internal-facing formats.
     - Include relevant Stripe Dashboard links when appropriate to help the user.
@@ -210,6 +211,59 @@
         return "Sorry, I encountered an error while processing your request. Please check the console for details.";
       }
     };
+
+    const generateUpdatedRules = async (userInstruction, currentRules) => {
+        if (!ai) {
+            return { error: "API key has not been initialized." };
+        }
+        
+        const RULES_UPDATER_PROMPT = `You are an AI assistant that helps a user update your own core operational rules. The user will provide an instruction to change the rules. Your task is to generate a JSON object containing two keys: "confirmationMessage" and "updatedRules".
+- "confirmationMessage": A brief, friendly message confirming the update.
+- "updatedRules": The complete, new set of rules that incorporates the user's instruction. Ensure the new rules are well-formatted and maintain the original structure.`;
+
+        const fullPrompt = `Update the following rules based on my instruction.
+
+# CURRENT RULES
+${currentRules}
+
+# MY INSTRUCTION
+"${userInstruction}"
+`;
+
+        try {
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: fullPrompt,
+                config: {
+                    systemInstruction: RULES_UPDATER_PROMPT,
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: 'OBJECT',
+                        properties: {
+                            confirmationMessage: {
+                                type: 'STRING',
+                                description: 'A brief, friendly message confirming the update.'
+                            },
+                            updatedRules: {
+                                type: 'STRING',
+                                description: 'The complete, new set of rules.'
+                            },
+                        },
+                        required: ["confirmationMessage", "updatedRules"],
+                    },
+                },
+            });
+            const jsonText = response.text.trim();
+            const sanitizedJson = jsonText.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+            return JSON.parse(sanitizedJson);
+        } catch (error) {
+            console.error("Error generating updated rules:", error);
+            if (error instanceof Error && (error.message.includes('API key not valid') || error.message.includes('API_KEY_INVALID'))) {
+                return { error: "The provided API key is not valid. Please refresh the page to enter a new one." };
+            }
+            return { error: "Sorry, I encountered an error while updating the rules. Please check the console for details." };
+        }
+    };
     // --- End of services/geminiService.ts ---
 
 
@@ -353,7 +407,7 @@
         }
       }, [text]);
 
-      const placeholder = `Message #${getChannelName(activeChannel)}`;
+      const placeholder = activeChannel === 'CR' ? 'Tell me what to change in the rules...' : `Message #${getChannelName(activeChannel)}`;
 
       const ToolbarButton = ({ children, ariaLabel, title, disabled = true, onClick }) => (
         <button
@@ -579,7 +633,7 @@
 
       const getInitialCrMessage = useCallback((rules) => ({
         id: 'cr-initial',
-        text: `The current core rules are listed below. Send a message in this channel to update them.\n\n---\n${rules}`,
+        text: `This is where you can view and update my core rules. Just tell me what changes you'd like to make, and I'll revise them for you.\n\n---\n${rules}`,
         sender: 'ai',
         name: 'System',
         avatar: 'S',
@@ -677,7 +731,7 @@
 
       const handleSendMessage = useCallback(async (text, format) => {
         if (!text.trim() || isLoading) return;
-        
+
         const isNewContext = !!isNewContextMode[format];
 
         const userMessage = {
@@ -687,33 +741,55 @@
           name: 'User',
           avatar: 'U',
         };
-        
+
         setMessages(prev => ({
           ...prev,
           [format]: isNewContext ? [userMessage] : [...prev[format], userMessage],
         }));
 
         setLastUserPrompt(prev => ({...prev, [format]: text }));
-        
+
         if (format === 'CR') {
-            setCoreRules(text);
-            const systemMessage = {
-                id: (Date.now() + 1).toString(),
-                text: `Core rules have been updated successfully.\n\n---\n${text}`,
-                sender: 'ai',
-                name: 'System',
-                avatar: 'S',
-            };
-            setMessages(prev => ({
-                ...prev,
-                [format]: [...prev[format], systemMessage]
-            }));
+            setIsLoading(true);
+            const result = await generateUpdatedRules(text, coreRules);
+
+            if (result.error) {
+                const errorMessage = {
+                    id: (Date.now() + 1).toString(),
+                    text: result.error,
+                    sender: 'ai',
+                    name: 'System',
+                    avatar: 'S',
+                };
+                setMessages(prev => ({
+                    ...prev,
+                    [format]: [...prev[format], errorMessage]
+                }));
+                if (result.error.includes('API key is not valid')) {
+                    localStorage.removeItem('gemini_api_key');
+                    setApiKey(null);
+                }
+            } else {
+                setCoreRules(result.updatedRules);
+                const systemMessage = {
+                    id: (Date.now() + 1).toString(),
+                    text: `${result.confirmationMessage}\n\n---\n${result.updatedRules}`,
+                    sender: 'ai',
+                    name: 'System',
+                    avatar: 'S',
+                };
+                setMessages(prev => ({
+                    ...prev,
+                    [format]: [...prev[format], systemMessage]
+                }));
+            }
+            setIsLoading(false);
             return;
         }
-        
+
         await processGenerationRequest(text, format, isNewContext);
 
-      }, [isLoading, isNewContextMode, processGenerationRequest]);
+      }, [isLoading, isNewContextMode, processGenerationRequest, coreRules]);
 
       const handleRegenerate = useCallback(async () => {
         if (!canRegenerate) return;
@@ -737,7 +813,7 @@
                 key={activePanel}
                 format={activePanel}
                 messages={messages[activePanel]}
-                isLoading={isLoading && activePanel !== 'CR'}
+                isLoading={isLoading}
                 onSendMessage={handleSendMessage}
                 onClearChat={handleClearChat}
                 onRegenerate={handleRegenerate}
