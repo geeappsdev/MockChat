@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 
-const TimerItem = ({ id, onDelete }: any) => {
+const TimerItem = ({ id, onDelete }) => {
     const [label, setLabel] = useState(`Chat ${id}`);
     const [timeLeft, setTimeLeft] = useState(0); // in seconds
     const [isRunning, setIsRunning] = useState(false);
@@ -101,39 +100,49 @@ const TimerItem = ({ id, onDelete }: any) => {
     );
 };
 
-const TimerWidget = () => {
-    const [timers, setTimers] = useState([{ id: Date.now() }]);
+const TimerWidget = ({ onClose }) => {
+    const [timers, setTimers] = useState([{ id: 1 }]);
 
     const addTimer = () => {
-        setTimers([...timers, { id: Date.now() }]);
+        const newId = timers.length > 0 ? Math.max(...timers.map(t => t.id)) + 1 : 1;
+        setTimers([...timers, { id: newId }]);
     };
 
-    const removeTimer = (id: number) => {
+    const removeTimer = (id) => {
         setTimers(timers.filter(t => t.id !== id));
     };
 
     return (
-        <div className="space-y-4">
-             <div className="flex items-center justify-between px-1">
-                <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Timers</h3>
-                <button 
-                    onClick={addTimer}
-                    className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 transition-colors flex items-center"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+        <div className="fixed bottom-4 right-4 w-80 max-h-[80vh] flex flex-col bg-white/90 dark:bg-zinc-900/90 backdrop-blur-xl border border-zinc-200 dark:border-zinc-700 shadow-2xl rounded-2xl z-50 overflow-hidden animate-fade-in-up">
+            <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/80 dark:bg-zinc-950/80">
+                <h3 className="font-bold text-zinc-800 dark:text-zinc-100 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    Add
-                </button>
+                    Active Timers
+                </h3>
+                <div className="flex gap-1">
+                     <button onClick={addTimer} className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 dark:text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors" title="Add Timer">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                    <button onClick={onClose} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg text-zinc-500 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-400 transition-colors" title="Close Widget">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
             </div>
-            <div className="space-y-3">
+            <div className="p-4 overflow-y-auto custom-scrollbar space-y-3 max-h-[400px]">
                 {timers.map(timer => (
                     <TimerItem key={timer.id} id={timer.id} onDelete={removeTimer} />
                 ))}
                 {timers.length === 0 && (
-                    <div className="text-center py-6 bg-zinc-50 dark:bg-white/5 rounded-xl border border-dashed border-zinc-200 dark:border-white/10">
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">No active timers</p>
-                        <button onClick={addTimer} className="mt-2 text-xs font-bold text-zinc-900 dark:text-zinc-100 hover:underline">Create one</button>
+                    <div className="text-center py-8 text-zinc-400 dark:text-zinc-600 text-sm">
+                        No active timers.
+                        <br/>
+                        Click + to start tracking.
                     </div>
                 )}
             </div>
