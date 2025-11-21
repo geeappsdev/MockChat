@@ -1,6 +1,4 @@
 
-
-
 export const FORMATS = [
   { id: 'EO', name: 'Email & Record', description: 'Generates the customer email draft PLUS the full internal investigation record.' },
   { id: 'CL', name: 'Chat/RAC Notes', description: 'Simplified outline in a structured list format.' },
