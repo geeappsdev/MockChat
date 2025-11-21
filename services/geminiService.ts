@@ -3,9 +3,12 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { SYSTEM_PROMPT, FORMAT_DEFINITIONS } from '../constants';
 
 // Configuration for the Proxy
-// We use a relative path '/google-api' which Vite forwards to Google.
-// This bypasses browser-level blocks on 'generativelanguage.googleapis.com'.
-const PROXY_BASE_URL = '/google-api';
+// In Vite, import.meta.env.DEV is true during development, false in production.
+// We only want to use the local proxy during development. 
+// In production, we connect directly to the Google API.
+// Fix: Use process.env.NODE_ENV instead of import.meta.env.DEV to avoid "Property 'env' does not exist on type 'ImportMeta'" TS error.
+const isDevelopment = process.env.NODE_ENV === 'development';
+const PROXY_BASE_URL = isDevelopment ? '/google-api' : undefined;
 
 const getFriendlyErrorMessage = (error) => {
     const msg = error.message || '';
