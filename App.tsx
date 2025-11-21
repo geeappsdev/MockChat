@@ -1,17 +1,12 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatPanel from './components/ChatPanel';
 import CoreRulesPanel from './components/CoreRulesPanel';
-import ApiKeyModal from './components/ApiKeyModal';
 import { generateResponseStream } from './services/geminiService';
 import { INITIAL_GENERAL_RULES, CHANNEL_QUICK_LINKS, CONTEXT_LINKS, detectContext } from './constants';
 
 const App = () => {
-  const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_api_key') || '');
-  const [showApiKeyModal, setShowApiKeyModal] = useState(!apiKey);
-  
   const [activeChannel, setActiveChannel] = useState('EO');
   const [messages, setMessages] = useState({});
   const [drafts, setDrafts] = useState({});
@@ -24,27 +19,6 @@ const App = () => {
   useEffect(() => {
     localStorage.setItem('core_rules', coreRules);
   }, [coreRules]);
-  
-  useEffect(() => {
-      // If an API key is provided via environment variables (deployment), use it and hide the modal.
-      const envApiKey = process.env.API_KEY;
-      if (envApiKey) {
-          setApiKey(envApiKey);
-          setShowApiKeyModal(false);
-      }
-  }, []);
-
-  const handleApiKeySubmit = (key) => {
-      setApiKey(key);
-      localStorage.setItem('gemini_api_key', key);
-      setShowApiKeyModal(false);
-  }
-  
-  const handleResetApiKey = () => {
-      setApiKey('');
-      localStorage.removeItem('gemini_api_key');
-      setShowApiKeyModal(true);
-  }
 
   const getCurrentMessages = () => messages[activeChannel] || [];
 
@@ -55,36 +29,51 @@ const App = () => {
     }));
   };
 
-  const detectedContext = detectContext((messages[activeChannel] || []).map(m => m.text).join('\n'));
+  // Context Detection Logic
+  const getDetectedContext = () => {
+    const channelMessages = messages[activeChannel] || [];
+    if (channelMessages.length === 0) return null;
+    const lastUserMsg = [...channelMessages].reverse().find(m => m.sender === 'user');
+    if (!lastUserMsg) return null;
+    return detectContext(lastUserMsg.text);
+  };
+
+  const detectedContext = getDetectedContext();
 
   const getQuickLinks = () => {
     const defaultLinks = CHANNEL_QUICK_LINKS[activeChannel] || [];
     if (detectedContext && CONTEXT_LINKS[detectedContext]) {
         const contextLinks = CONTEXT_LINKS[detectedContext];
-        return [...contextLinks, ...defaultLinks.filter(l => !contextLinks.find(cl => cl.url === l.url))];
+        const combined = [...contextLinks, ...defaultLinks];
+        const unique = combined.filter((link, index, self) =>
+            index === self.findIndex((t) => (
+                t.url === link.url
+            ))
+        );
+        return unique;
     }
     return defaultLinks;
   };
 
   const handleSendMessage = async (text) => {
-    if (!apiKey) {
-        setShowApiKeyModal(true);
-        return;
-    }
     setDrafts(prev => ({ ...prev, [activeChannel]: '' }));
 
     const userMsg = { 
         id: Date.now(), 
         sender: 'user', 
         name: 'Admin User', 
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=256', 
+        avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80', 
         text 
     };
     addMessage(activeChannel, userMsg);
     setIsLoading(true);
     setConnectionStatus('connecting');
 
+    if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+    }
     abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
 
     try {
         const currentHistory = (messages[activeChannel] || [])
@@ -95,9 +84,9 @@ const App = () => {
             text, 
             activeChannel, 
             currentHistory, 
-            coreRules,
-            apiKey,
-            abortControllerRef.current.signal
+            coreRules, 
+            (messages[activeChannel] || []).length === 0,
+            signal
         );
         
         setConnectionStatus('connected');
@@ -109,31 +98,45 @@ const App = () => {
             id: aiMsgId, 
             sender: 'ai', 
             name: 'Gee', 
-            avatar: 'https://ui-avatars.com/api/?name=G&background=000&color=fff&rounded=true&bold=true&size=128', 
+            avatar: 'https://ui-avatars.com/api/?name=Gee+AI&background=18181b&color=fff&rounded=true&bold=true&size=128', 
             text: '' 
         });
 
-        for await (const chunk of stream) {
-            const chunkText = chunk.text; 
-            if (chunkText) {
-                aiResponseText += chunkText;
-                setMessages(prev => ({
-                    ...prev,
-                    [activeChannel]: (prev[activeChannel] || []).map(msg => 
-                        msg.id === aiMsgId ? { ...msg, text: aiResponseText } : msg
-                    )
-                }));
+        if (stream) {
+            for await (const chunk of stream) {
+                if (signal.aborted) break; 
+
+                const chunkText = chunk.text; 
+                if (chunkText) {
+                    aiResponseText += chunkText;
+                    
+                    setMessages(prev => {
+                        const channelMsgs = prev[activeChannel] || [];
+                        const updatedMsgs = channelMsgs.map(msg => 
+                            msg.id === aiMsgId ? { ...msg, text: aiResponseText } : msg
+                        );
+                        return { ...prev, [activeChannel]: updatedMsgs };
+                    });
+                }
             }
         }
+
     } catch (error) {
-        if (error.name !== 'AbortError') {
-            setConnectionStatus('error');
+        if (error.name === 'AbortError') {
+            console.log('Generation stopped by user');
+        } else {
+            console.error("Generation failed", error);
+            const errorText = error.message || "I encountered an error. Please check your API key or try again.";
+            if (errorText.includes("Connection Blocked") || errorText.includes("Network or request error")) {
+                 setConnectionStatus('error');
+            }
+
             addMessage(activeChannel, { 
                 id: Date.now() + 1, 
                 sender: 'ai', 
                 name: 'System Error', 
-                avatar: 'https://ui-avatars.com/api/?name=E&background=ef4444&color=fff&rounded=true&bold=true&size=128', 
-                text: `**Error:** ${error.message}` 
+                avatar: 'https://ui-avatars.com/api/?name=Error&background=ef4444&color=fff&rounded=true&bold=true&size=128', 
+                text: `**Error:** ${errorText}` 
             });
         }
     } finally {
@@ -143,7 +146,10 @@ const App = () => {
   };
 
   const handleStopGeneration = () => {
-      abortControllerRef.current?.abort();
+      if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+          setIsLoading(false);
+      }
   };
 
   const handleClearChat = () => {
@@ -151,7 +157,8 @@ const App = () => {
   };
   
   const handleRegenerate = () => {
-      const lastUserMsg = [...(messages[activeChannel] || [])].reverse().find(m => m.sender === 'user');
+      const currentMsgs = messages[activeChannel] || [];
+      const lastUserMsg = [...currentMsgs].reverse().find(m => m.sender === 'user');
       if (lastUserMsg) {
           handleSendMessage(lastUserMsg.text);
       }
@@ -161,24 +168,22 @@ const App = () => {
       setDrafts(prev => ({ ...prev, [activeChannel]: text }));
   };
 
+  const canRegenerate = (messages[activeChannel] || []).length > 0;
+
   return (
-    <div className="flex h-screen overflow-hidden">
-      {showApiKeyModal && <ApiKeyModal onSubmit={handleApiKeySubmit} />}
-      
+    <div className="flex h-screen text-zinc-900 dark:text-zinc-200 font-sans overflow-hidden">
       <Sidebar 
         activeChannel={activeChannel} 
         onChannelSelect={setActiveChannel} 
         connectionStatus={connectionStatus}
         quickLinks={getQuickLinks()}
-        onResetApiKey={handleResetApiKey}
       />
       
-      <main className="flex-1 min-w-0 glass-panel flex flex-col">
+      <main className="flex-1 min-w-0 relative flex flex-col z-0 transition-all duration-300">
          {activeChannel === 'CR' ? (
              <CoreRulesPanel 
                 rules={coreRules} 
                 onUpdateRules={setCoreRules}
-                apiKey={apiKey}
                 isLoading={isLoading}
              />
          ) : (
@@ -190,7 +195,7 @@ const App = () => {
                 onStopGeneration={handleStopGeneration}
                 onClearChat={handleClearChat}
                 onRegenerate={handleRegenerate}
-                canRegenerate={(messages[activeChannel] || []).length > 0}
+                canRegenerate={canRegenerate}
                 draft={drafts[activeChannel] || ''}
                 onDraftChange={handleDraftChange}
                 detectedContext={detectedContext}

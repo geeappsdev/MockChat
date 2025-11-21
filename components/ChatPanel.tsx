@@ -18,25 +18,28 @@ const Header = ({ activeChannel, detectedContext }) => {
   }
 
   return (
-    <header className="flex items-center justify-between px-6 border-b border-white/20 dark:border-white/10 bg-white/30 dark:bg-black/30 backdrop-blur-xl sticky top-0 z-10 h-16 shadow-sm">
-      <div className="flex items-center min-w-0 gap-4">
-        <div>
-            <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 flex items-center whitespace-nowrap tracking-tight drop-shadow-sm">
-            <span className="mr-1.5 text-zinc-500 dark:text-zinc-400 font-normal opacity-70" aria-hidden="true">#</span> 
+    <header className="flex items-center justify-between px-6 py-3 border-b border-zinc-200/50 dark:border-white/5 bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl sticky top-0 z-10 h-[4.5rem] shrink-0 transition-all">
+      <div className="flex items-center min-w-0 gap-4 w-full">
+        <div className="flex flex-col justify-center min-w-0">
+            <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100 flex items-center whitespace-nowrap tracking-tight">
+            <span className="mr-1 text-zinc-400 dark:text-zinc-600 font-normal font-mono" aria-hidden="true">#</span> 
             {getChannelName(activeChannel)}
             </h2>
+            <span className="text-xs text-zinc-500 dark:text-zinc-400 truncate max-w-xl hidden sm:block leading-none mt-0.5">{getDescription(activeChannel)}</span>
         </div>
         
         {/* Context Badge */}
         {detectedContext && activeChannel !== 'CR' && (
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/10 dark:bg-indigo-400/10 border border-indigo-500/20 backdrop-blur-md animate-fade-in-up">
-                <span className="text-xs font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wide">Context:</span>
-                <span className="text-xs font-medium text-indigo-700 dark:text-indigo-200 capitalize">{detectedContext}</span>
+            <div className="ml-auto hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-50/80 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-500/20 backdrop-blur-md animate-fade-in-up">
+                <div className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                </div>
+                <div className="flex flex-col leading-none">
+                    <span className="text-[9px] font-bold text-indigo-400 dark:text-indigo-400 uppercase tracking-wider">Context</span>
+                    <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-200 capitalize">{detectedContext}</span>
+                </div>
             </div>
-        )}
-
-        {activeChannel !== 'CR' && (
-            <span className="hidden lg:block text-sm text-zinc-600 dark:text-zinc-300 truncate border-l border-zinc-400/30 dark:border-white/10 pl-4 ml-1 opacity-80">{getDescription(activeChannel)}</span>
         )}
       </div>
     </header>
@@ -79,20 +82,20 @@ const ChatWindow = ({ messages, isLoading, activeChannel }) => {
     <div 
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4 md:p-6 scrollbar-thin scrollbar-thumb-zinc-300 dark:scrollbar-thumb-zinc-700 scrollbar-track-transparent" 
+        className="flex-1 overflow-y-auto p-4 md:px-12 md:py-8 scrollbar-thin scrollbar-track-transparent" 
         tabIndex={0} 
         aria-label={`Chat history for channel ${getChannelName(activeChannel)}`}
     >
       {showEmptyState ? (
-        <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500 animate-fade-in-up px-4">
-            <div className="bg-white/40 dark:bg-white/5 p-8 rounded-3xl mb-6 border border-white/30 dark:border-white/10 shadow-lg backdrop-blur-md" aria-hidden="true">
-                 <span className="text-6xl font-bold text-zinc-400 dark:text-zinc-600">#</span>
+        <div className="flex flex-col items-center justify-center h-full text-center text-zinc-500 animate-fade-in-up px-4 pb-20">
+            <div className="w-20 h-20 bg-gradient-to-br from-zinc-100 to-zinc-50 dark:from-white/5 dark:to-transparent rounded-[1.5rem] mb-6 border border-zinc-200 dark:border-white/10 shadow-lg flex items-center justify-center backdrop-blur-sm transform rotate-3" aria-hidden="true">
+                 <span className="text-4xl font-bold text-zinc-300 dark:text-zinc-600 font-mono">#</span>
             </div>
-            <h3 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-3 tracking-tight drop-shadow-sm">Welcome to #{getChannelName(activeChannel)}</h3>
-            <p className="max-w-lg text-lg text-zinc-600 dark:text-zinc-300 leading-relaxed opacity-90">{EMPTY_STATE_MESSAGES[activeChannel]}</p>
+            <h3 className="text-xl font-bold text-zinc-900 dark:text-zinc-100 mb-2 tracking-tight">Welcome to #{getChannelName(activeChannel)}</h3>
+            <p className="max-w-sm text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">{EMPTY_STATE_MESSAGES[activeChannel]}</p>
         </div>
       ) : (
-        <div className="space-y-6" role="log" aria-live="polite">
+        <div className="space-y-10 max-w-4xl mx-auto pb-6" role="log" aria-live="polite">
             {messages.map(msg => <Message key={msg.id} message={msg} />)}
             {isLoading && <TypingIndicator />}
         </div>
@@ -103,14 +106,14 @@ const ChatWindow = ({ messages, isLoading, activeChannel }) => {
 
 const ChatPanel = ({ activeChannel, messages, isLoading, onSendMessage, onStopGeneration, onClearChat, onRegenerate, canRegenerate, draft, onDraftChange, detectedContext }) => {
   return (
-    <div className="flex-1 flex flex-col h-full bg-transparent relative transition-colors duration-300">
+    <div className="flex-1 flex flex-col h-full bg-transparent relative overflow-hidden">
       <Header activeChannel={activeChannel} detectedContext={detectedContext} />
       <ChatWindow 
         messages={messages} 
         isLoading={isLoading} 
         activeChannel={activeChannel}
       />
-      <div className="p-4 md:p-6 pt-0 bg-transparent">
+      <div className="px-4 md:px-12 pb-6 pt-2 bg-gradient-to-t from-zinc-50 via-zinc-50/80 to-transparent dark:from-[#050507] dark:via-[#050507]/80 dark:to-transparent z-10">
         <MessageInput 
           onSendMessage={onSendMessage} 
           onStopGeneration={onStopGeneration}
