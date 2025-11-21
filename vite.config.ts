@@ -4,9 +4,9 @@ import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  // IMPORTANT: Replace 'your-repo-name' with the actual name of your GitHub repository.
-  // For example, if your repo URL is https://github.com/user/my-app, set base to '/my-app/'.
-  base: '/your-repo-name/', 
+  // This must match the subfolder name of your GitHub Pages deployment.
+  // e.g., for https://geeappsdev.github.io/MockChat/, the base is '/MockChat/'.
+  base: '/MockChat/', 
   plugins: [react()],
   server: {
     proxy: {
