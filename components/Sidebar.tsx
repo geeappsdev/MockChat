@@ -3,13 +3,14 @@ import React, { useState } from 'react';
 import { FORMATS } from '../constants';
 import useLocalStorage from '../hooks/useLocalStorage';
 
-const Sidebar = ({ activeChannel, onChannelSelect, connectionStatus = 'connected', quickLinks = [] }) => {
+const Sidebar = ({ activeChannel, onChannelSelect, connectionStatus = 'connected', quickLinks = [], userProfile, onEditProfile, onClearChat }) => {
   const [customShortcuts, setCustomShortcuts] = useLocalStorage('gee_custom_shortcuts', []);
   const [isAddingShortcut, setIsAddingShortcut] = useState(false);
   const [newShortcut, setNewShortcut] = useState({ name: '', url: '' });
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const CORE_APPS = [
-      { name: 'Gee AI', icon: 'https://ui-avatars.com/api/?name=Gee+AI&background=4f46e5&color=fff&rounded=true&bold=true&size=64', active: true, url: null },
+      { name: 'Gee AI', icon: 'https://ui-avatars.com/api/?name=Gee+AI&background=4f46e5&color=fff&rounded=true&bold=true&size=64', active: true, url: null, action: () => onChannelSelect('EO') },
       { name: 'Stripe Docs', icon: 'https://cdn.worldvectorlogo.com/logos/stripe-4.svg', active: true, url: 'https://docs.stripe.com/' },
       { name: 'Stripe Support', icon: 'https://cdn.worldvectorlogo.com/logos/stripe-4.svg', active: true, url: 'https://support.stripe.com/' },
       { name: 'Google Calendar', icon: 'https://cdn.worldvectorlogo.com/logos/google-calendar.svg', active: true, url: 'https://calendar.google.com/' },
@@ -53,22 +54,61 @@ const Sidebar = ({ activeChannel, onChannelSelect, connectionStatus = 'connected
       setCustomShortcuts(updated);
   };
 
+  const handleClearClick = () => {
+    if (confirmClear) {
+        if (onClearChat) onClearChat();
+        setConfirmClear(false);
+        onChannelSelect('EO'); 
+    } else {
+        setConfirmClear(true);
+        setTimeout(() => setConfirmClear(false), 3000);
+    }
+  };
+
   return (
     <aside className="w-[280px] bg-white/60 dark:bg-zinc-950/60 backdrop-blur-2xl flex flex-col h-full border-r border-zinc-200/50 dark:border-white/5 z-20 flex-shrink-0 transition-all duration-300" aria-label="Sidebar navigation">
       {/* Header */}
       <div className="px-6 h-[4.5rem] flex items-center border-b border-zinc-200/50 dark:border-white/5 flex-shrink-0">
         <h1 className="text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-100 flex items-center gap-3">
-            <div className="w-8 h-8 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-1 ring-white/10">
+            <div className="w-8 h-8 bg-gradient-to-tr from-zinc-800 to-zinc-600 dark:from-white dark:to-zinc-300 text-white dark:text-black rounded-lg flex items-center justify-center shadow-lg shadow-zinc-500/20 ring-1 ring-black/5">
                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                    <path fillRule="evenodd" d="M9.315 7.584C12.195 3.883 16.695 1.5 21.75 1.5a.75.75 0 01.75.75c0 5.056-2.383 9.555-6.084 12.436h.684c1.245 0 2.25 1.005 2.25 2.25v6.75a.75.75 0 01-.75.75h-3a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-2.25a.75.75 0 00-.75.75v4.5a.75.75 0 01-.75.75h-3a.75.75 0 01-.75-.75v-6.75a2.25 2.25 0 012.25-2.25h.684zM7.5 19.5h1.5v-3h-1.5v3zm6 0h1.5v-3h-1.5v3z" clipRule="evenodd" />
-                    <path d="M4.367 7.652a.75.75 0 111.06-1.06l4.086 4.086a.75.75 0 010 1.061l-4.086 4.085a.75.75 0 11-1.061-1.06l3.556-3.556-3.555-3.556z" />
-                </svg>
+                   <path fillRule="evenodd" d="M3 6a3 3 0 013-3h12a3 3 0 013 3v12a3 3 0 01-3 3H6a3 3 0 01-3-3V6zm14.25 6a.75.75 0 01-.22.53l-2.25 2.25a.75.75 0 11-1.06-1.06L15.44 12l-1.72-1.72a.75.75 0 111.06-1.06l2.25 2.25c.141.14.22.331.22.53zm-10.28 0a.75.75 0 01.22-.53l2.25-2.25a.75.75 0 111.06 1.06L8.56 12l1.72 1.72a.75.75 0 11-1.06 1.06l-2.25-2.25a.75.75 0 01-.22-.53z" clipRule="evenodd" />
+                 </svg>
             </div>
-            <span className="font-sans text-[15px]">Gee Support</span>
+            <div className="flex flex-col leading-none">
+                <span className="font-black text-[13px] tracking-tighter uppercase text-zinc-800 dark:text-white">GEE WEB APP</span>
+                <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">DEVELOPER</span>
+            </div>
         </h1>
       </div>
 
       <div className="flex-1 px-3 py-6 space-y-8 overflow-y-auto scrollbar-thin">
+        
+        {/* NEW CASE BUTTON */}
+        <div className="px-3">
+            <button
+                onClick={handleClearClick}
+                className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 shadow-sm ${
+                    confirmClear 
+                    ? 'bg-red-500 hover:bg-red-600 text-white ring-2 ring-red-200 dark:ring-red-900' 
+                    : 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 border border-zinc-200 dark:border-white/10 hover:border-indigo-500/50 hover:shadow-md'
+                }`}
+            >
+                {confirmClear ? (
+                    <>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        Confirm Clear
+                    </>
+                ) : (
+                    <>
+                        <svg className="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+                        New Case
+                    </>
+                )}
+            </button>
+            <p className="mt-2 text-[10px] text-center text-zinc-400 dark:text-zinc-500">Clears context for fresh start</p>
+        </div>
+
         {/* Formats Section */}
         <nav role="group" aria-labelledby="formats-heading">
           <h3 id="formats-heading" className="px-3 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-2 font-mono">
@@ -160,6 +200,7 @@ const Sidebar = ({ activeChannel, onChannelSelect, connectionStatus = 'connected
                      </a>
                   ) : (
                       <button 
+                        onClick={app.action}
                         className={`w-full flex items-center px-3 py-2 rounded-lg text-sm font-medium transition-colors group text-zinc-700 dark:text-zinc-300 hover:bg-white/80 dark:hover:bg-white/10 hover:shadow-sm border border-transparent hover:border-zinc-200 dark:hover:border-white/5`}
                       >
                         <img src={app.icon} alt={app.name} className={`w-4 h-4 mr-2.5 transition-all object-contain`} />
@@ -244,20 +285,29 @@ const Sidebar = ({ activeChannel, onChannelSelect, connectionStatus = 'connected
 
       {/* User Profile */}
       <div className="p-4 border-t border-zinc-200/50 dark:border-white/5 bg-white/30 dark:bg-black/20 backdrop-blur-lg">
-          <div className="flex items-center gap-3 hover:bg-white/50 dark:hover:bg-white/5 p-2 rounded-xl cursor-pointer transition-colors group">
+          <button 
+            onClick={onEditProfile}
+            className="w-full flex items-center gap-3 hover:bg-white/50 dark:hover:bg-white/5 p-2 rounded-xl cursor-pointer transition-colors group text-left"
+            title="Edit Profile"
+          >
               <div className="relative">
                   <img 
-                    src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80"
-                    alt="Admin User"
+                    src={userProfile?.avatar || "https://ui-avatars.com/api/?name=User"}
+                    alt={userProfile?.name || "User"}
                     className="w-8 h-8 rounded-lg shadow-sm object-cover ring-1 ring-black/5 dark:ring-white/10"
                   />
                   <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 border-2 border-white dark:border-zinc-900 rounded-full ${getStatusColor()}`}></div>
+                  <div className="absolute inset-0 bg-black/30 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                  </div>
               </div>
               <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">Admin User</div>
+                  <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                      {userProfile?.name || "Admin User"}
+                  </div>
                   <div className="text-[10px] text-zinc-500 dark:text-zinc-500 font-medium truncate">{getStatusText()}</div>
               </div>
-          </div>
+          </button>
       </div>
     </aside>
   );

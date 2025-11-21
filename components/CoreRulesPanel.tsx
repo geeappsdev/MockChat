@@ -16,7 +16,7 @@ const RulesHeader = () => (
     </header>
 );
 
-const CoreRulesPanel = ({ rules, onUpdateRules, isLoading }) => {
+const CoreRulesPanel = ({ rules, onUpdateRules, isLoading, apiKey }) => {
     const [instruction, setInstruction] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
     const [feedback, setFeedback] = useState(null);
@@ -27,7 +27,7 @@ const CoreRulesPanel = ({ rules, onUpdateRules, isLoading }) => {
         setFeedback(null);
         
         try {
-            const result = await generateUpdatedRules(instruction, rules);
+            const result = await generateUpdatedRules(instruction, rules, apiKey);
             if (result.error) {
                 setFeedback({ type: 'error', message: result.error });
             } else {

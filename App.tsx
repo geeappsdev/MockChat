@@ -3,6 +3,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatPanel from './components/ChatPanel';
 import CoreRulesPanel from './components/CoreRulesPanel';
+import ProfileSettingsModal from './components/ProfileSettingsModal';
+import ApiKeyModal from './components/ApiKeyModal';
+import useLocalStorage from './hooks/useLocalStorage';
 import { generateResponseStream } from './services/geminiService';
 import { INITIAL_GENERAL_RULES, CHANNEL_QUICK_LINKS, CONTEXT_LINKS, detectContext } from './constants';
 
@@ -14,11 +17,39 @@ const App = () => {
   const [coreRules, setCoreRules] = useState(() => localStorage.getItem('core_rules') || INITIAL_GENERAL_RULES);
   const [connectionStatus, setConnectionStatus] = useState('connected');
   
+  // User Profile State with Persistence
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [userProfile, setUserProfile] = useLocalStorage('gee_user_profile', {
+    name: 'Admin User',
+    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'
+  });
+
+  // API Key State
+  const [storedApiKey, setStoredApiKey] = useLocalStorage('gemini_api_key', '');
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  
+  // Effective Key Logic: Use Env Var if present (Dev/Build), otherwise use Stored Key (Runtime/Embed)
+  const effectiveApiKey = process.env.API_KEY || storedApiKey;
+
   const abortControllerRef = useRef(null);
 
   useEffect(() => {
     localStorage.setItem('core_rules', coreRules);
   }, [coreRules]);
+
+  // Check for API Key on mount
+  useEffect(() => {
+      if (!effectiveApiKey) {
+          setIsApiKeyModalOpen(true);
+      } else {
+          setIsApiKeyModalOpen(false);
+      }
+  }, [effectiveApiKey]);
+
+  const handleApiKeySubmit = (key) => {
+      setStoredApiKey(key);
+      setIsApiKeyModalOpen(false);
+  };
 
   const getCurrentMessages = () => messages[activeChannel] || [];
 
@@ -56,13 +87,19 @@ const App = () => {
   };
 
   const handleSendMessage = async (text) => {
+    if (!effectiveApiKey) {
+        setIsApiKeyModalOpen(true);
+        return;
+    }
+
     setDrafts(prev => ({ ...prev, [activeChannel]: '' }));
 
+    // Use dynamic profile info
     const userMsg = { 
         id: Date.now(), 
         sender: 'user', 
-        name: 'Admin User', 
-        avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80', 
+        name: userProfile.name, 
+        avatar: userProfile.avatar, 
         text 
     };
     addMessage(activeChannel, userMsg);
@@ -86,6 +123,7 @@ const App = () => {
             currentHistory, 
             coreRules, 
             (messages[activeChannel] || []).length === 0,
+            effectiveApiKey,
             signal
         );
         
@@ -177,6 +215,9 @@ const App = () => {
         onChannelSelect={setActiveChannel} 
         connectionStatus={connectionStatus}
         quickLinks={getQuickLinks()}
+        userProfile={userProfile}
+        onEditProfile={() => setIsProfileModalOpen(true)}
+        onClearChat={handleClearChat}
       />
       
       <main className="flex-1 min-w-0 relative flex flex-col z-0 transition-all duration-300">
@@ -185,6 +226,7 @@ const App = () => {
                 rules={coreRules} 
                 onUpdateRules={setCoreRules}
                 isLoading={isLoading}
+                apiKey={effectiveApiKey}
              />
          ) : (
             <ChatPanel 
@@ -202,6 +244,17 @@ const App = () => {
             />
          )}
       </main>
+
+      <ProfileSettingsModal 
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        userProfile={userProfile}
+        onSave={setUserProfile}
+      />
+      
+      {isApiKeyModalOpen && (
+          <ApiKeyModal onSubmit={handleApiKeySubmit} />
+      )}
     </div>
   );
 };

@@ -6,7 +6,6 @@ import { SYSTEM_PROMPT, FORMAT_DEFINITIONS } from '../constants';
 // In Vite, import.meta.env.DEV is true during development, false in production.
 // We only want to use the local proxy during development. 
 // In production, we connect directly to the Google API.
-// Fix: Use process.env.NODE_ENV instead of import.meta.env.DEV to avoid "Property 'env' does not exist on type 'ImportMeta'" TS error.
 const isDevelopment = process.env.NODE_ENV === 'development';
 const PROXY_BASE_URL = isDevelopment ? '/google-api' : undefined;
 
@@ -33,15 +32,14 @@ const getFriendlyErrorMessage = (error) => {
     return "An unexpected error occurred. Please try again.";
 };
 
-export const generateResponseStream = async (userQuery, format, channelHistory, coreRules, isNewContext, signal) => {
-  if (!process.env.API_KEY) {
-      throw new Error("API Key is missing. Please ensure process.env.API_KEY is set in your environment variables or GitHub Secrets.");
+export const generateResponseStream = async (userQuery, format, channelHistory, coreRules, isNewContext, apiKey, signal) => {
+  if (!apiKey) {
+      throw new Error("API Key is missing. Please enter a valid API key.");
   }
 
   // Initialize AI Client per request with the provided key and Proxy URL
-  // We cast to 'any' to bypass TypeScript checks for baseUrl which is an internal supported property
   const ai = new GoogleGenAI({ 
-      apiKey: process.env.API_KEY, 
+      apiKey: apiKey, 
       baseUrl: PROXY_BASE_URL,
       apiVersion: 'v1beta' 
   } as any);
@@ -137,12 +135,52 @@ export const generateResponseStream = async (userQuery, format, channelHistory, 
   }
 };
 
-export const generateUpdatedRules = async (userInstruction, currentRules) => {
-    // Mock response since rule updates via API key might be restricted in some envs
-    // In a real scenario, pass apiKey here too.
-    return { 
-        error: null,
-        updatedRules: currentRules, 
-        confirmationMessage: "Rule updates are simulated in this environment." 
-    };
+export const generateUpdatedRules = async (userInstruction, currentRules, apiKey) => {
+    if (!apiKey) {
+        return { error: "API Key is missing. Cannot update rules." };
+    }
+
+    const ai = new GoogleGenAI({ 
+        apiKey: apiKey, 
+        baseUrl: PROXY_BASE_URL,
+        apiVersion: 'v1beta' 
+    } as any);
+
+    const prompt = `
+    You are an expert System Architect and Prompt Engineer. 
+    Your task is to update the "Core Rules" configuration for an AI support agent based on the user's request.
+
+    ## Current Core Rules:
+    ${currentRules}
+
+    ## User's Requested Change/Feedback:
+    "${userInstruction}"
+
+    ## Instructions:
+    1. Analyze the user's request.
+    2. Modify the Current Core Rules to incorporate the request.
+    3. Ensure the new rules do not contradict the fundamental "Persona & Voice" unless explicitly asked.
+    4. Return ONLY the updated full text of the Core Rules. Do not include markdown fencing like \`\`\` or conversational text. Just the raw rule text.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{ role: 'user', parts: [{ text: prompt }] }]
+        });
+
+        const updatedRules = response.text.trim();
+        
+        return { 
+            error: null,
+            updatedRules: updatedRules, 
+            confirmationMessage: "Rules updated successfully based on your instructions." 
+        };
+    } catch (error) {
+        console.error("Error updating rules:", error);
+        return { 
+            error: getFriendlyErrorMessage(error),
+            updatedRules: currentRules 
+        };
+    }
 };

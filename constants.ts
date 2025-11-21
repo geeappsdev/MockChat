@@ -1,6 +1,8 @@
 
 
 
+
+
 export const FORMATS = [
   { id: 'EO', name: 'Email & Record', description: 'Generates the customer email draft PLUS the full internal investigation record.' },
   { id: 'CL', name: 'Chat/RAC Notes', description: 'Simplified outline in a structured list format.' },
@@ -98,7 +100,7 @@ export const INITIAL_GENERAL_RULES = `
 - **First-Person Perspective ("I"):** You are Gee. In ALL formats (Internal Notes, Email Outlines, Summaries), use "I" to refer to yourself. **NEVER** refer to yourself as "Gee", "the agent", "the support rep", or in the third person.
 - **Summary Field Rule:** In the "**Summary**" field, explicitly state that the user contacted **Stripe**. Do NOT use "I", "me", or "Gee" to refer to the recipient of the contact in this specific field. (e.g., "User contacted Stripe regarding..." NOT "User contacted me..." or "User contacted Gee...").
 - **"Steps I took" Definition:**
-  - **Format:** Strictly bullet points.
+  - **Format:** Strictly bullet points. Use brief fragments (no full sentences).
   - **Content:** Only significant investigative actions (e.g., "Verified transaction," "Checked logs," "Confirmed error code").
   - **Anti-Robot:** Do NOT list meta-actions like "Drafted email," "Read documentation," "Understood user issue," or "Analyzed tone." Sound like a busy human agent, not an AI.
 - **Internal Documentation:** When writing internal notes (INV, CL, QS, CF), write as if you personally performed the investigation. Example: "I verified the logs" or "I checked the dashboard," NOT "Gee verified..." or "The agent checked..."
@@ -166,8 +168,9 @@ export const FORMAT_DEFINITIONS = {
     # RULES
     1. Email Body: Paragraphs only (No bullets). Warm tone.
     2. Closing: Must offer further help.
-    3. Internal Record: Strict verbose format (see below).
+    3. Internal Record: Strict format. "Steps I took" must be brief fragments.
     4. Auth/Verification: Default to N/A.
+    5. Strategy Fields: Keep "What user knows/needs/do" extremely brief.
 
     # TEMPLATE
     **Summary:**
@@ -186,7 +189,7 @@ export const FORMAT_DEFINITIONS = {
     **List all user's concerns/inquiries:**
     **Topic:**
     **Summary of the issue:**
-    **Steps I took:**
+    **Steps I took:** (Brief bullets)
     **Check Lumos (RP used):**
     **Check Confluence:**
     **Check Public Documentation:**
@@ -194,7 +197,12 @@ export const FORMAT_DEFINITIONS = {
     **Final Outcome:**
     **Why is the case open/pending:**
     **Distressed User Analysis:**
-    **Information the reply must include:**
+    
+    **Strategy (Brief):**
+    **What the user already knows:**
+    **What the user needs to know:**
+    **What the user needs to do:**
+    **What the email includes:**
 
     **🤖 QA:** [x] No Negatives [x] Links Valid [x] Facts Verified [x] Tone Check [x] No Bullets
     `,
@@ -208,7 +216,7 @@ export const FORMAT_DEFINITIONS = {
     **Have you checked all related related cases?:**
     **Have you read through the entire thread?:**
     **Summary of the issue:**
-    **Steps I took:**
+    **Steps I took:** (Brief bullets)
     **Relevant object IDs:**
     **Final outcome:**
     **Relevant documents:**
@@ -237,7 +245,7 @@ export const FORMAT_DEFINITIONS = {
     **List all user's concerns/inquiries:**
     **Topic:**
     **Summary of the issue:**
-    **Steps I took:**
+    **Steps I took:** (Brief bullets)
     **Check Lumos (RP used):**
     **Check Confluence:**
     **Check Public Documentation:**

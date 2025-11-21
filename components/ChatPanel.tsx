@@ -5,7 +5,7 @@ import MessageInput from './MessageInput';
 import TypingIndicator from './TypingIndicator';
 import { FORMATS, EMPTY_STATE_MESSAGES } from '../constants';
 
-const Header = ({ activeChannel, detectedContext }) => {
+const Header = ({ activeChannel, detectedContext, onClearChat }) => {
   const getChannelName = (channelId) => {
     const format = FORMATS.find(f => f.id === activeChannel);
     if (!format) return 'product-team';
@@ -16,6 +16,18 @@ const Header = ({ activeChannel, detectedContext }) => {
       const format = FORMATS.find(f => f.id === activeChannel);
       return format ? format.description : '';
   }
+  
+  const [confirmClear, setConfirmClear] = useState(false);
+  
+  const handleClear = () => {
+      if (confirmClear) {
+          onClearChat();
+          setConfirmClear(false);
+      } else {
+          setConfirmClear(true);
+          setTimeout(() => setConfirmClear(false), 3000);
+      }
+  };
 
   return (
     <header className="flex items-center justify-between px-6 py-3 border-b border-zinc-200/50 dark:border-white/5 bg-white/60 dark:bg-zinc-950/60 backdrop-blur-xl sticky top-0 z-10 h-[4.5rem] shrink-0 transition-all">
@@ -28,19 +40,35 @@ const Header = ({ activeChannel, detectedContext }) => {
             <span className="text-xs text-zinc-500 dark:text-zinc-400 truncate max-w-xl hidden sm:block leading-none mt-0.5">{getDescription(activeChannel)}</span>
         </div>
         
-        {/* Context Badge */}
-        {detectedContext && activeChannel !== 'CR' && (
-            <div className="ml-auto hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-50/80 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-500/20 backdrop-blur-md animate-fade-in-up">
-                <div className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+        <div className="ml-auto flex items-center gap-3">
+            {/* Context Badge */}
+            {detectedContext && activeChannel !== 'CR' && (
+                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-50/80 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-500/20 backdrop-blur-md animate-fade-in-up">
+                    <div className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                    </div>
+                    <div className="flex flex-col leading-none">
+                        <span className="text-[9px] font-bold text-indigo-400 dark:text-indigo-400 uppercase tracking-wider">Context</span>
+                        <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-200 capitalize">{detectedContext}</span>
+                    </div>
                 </div>
-                <div className="flex flex-col leading-none">
-                    <span className="text-[9px] font-bold text-indigo-400 dark:text-indigo-400 uppercase tracking-wider">Context</span>
-                    <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-200 capitalize">{detectedContext}</span>
-                </div>
-            </div>
-        )}
+            )}
+
+            {/* Clear Button */}
+            {activeChannel !== 'CR' && (
+                <button 
+                    onClick={handleClear}
+                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                        confirmClear 
+                        ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400' 
+                        : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/5'
+                    }`}
+                >
+                    {confirmClear ? 'Confirm?' : 'Clear'}
+                </button>
+            )}
+        </div>
       </div>
     </header>
   );
@@ -107,7 +135,7 @@ const ChatWindow = ({ messages, isLoading, activeChannel }) => {
 const ChatPanel = ({ activeChannel, messages, isLoading, onSendMessage, onStopGeneration, onClearChat, onRegenerate, canRegenerate, draft, onDraftChange, detectedContext }) => {
   return (
     <div className="flex-1 flex flex-col h-full bg-transparent relative overflow-hidden">
-      <Header activeChannel={activeChannel} detectedContext={detectedContext} />
+      <Header activeChannel={activeChannel} detectedContext={detectedContext} onClearChat={onClearChat} />
       <ChatWindow 
         messages={messages} 
         isLoading={isLoading} 
