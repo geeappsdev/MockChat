@@ -1,130 +1,159 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatPanel from './components/ChatPanel';
-import CoreRulesPanel from './components/CoreRulesPanel';
+import CoreRulesModal from './components/CoreRulesModal';
 import ProfileSettingsModal from './components/ProfileSettingsModal';
-import ApiKeyModal from './components/ApiKeyModal';
+import SourceTruthModal from './components/SourceTruthModal';
+import SustainabilityModal from './components/SustainabilityModal';
 import useLocalStorage from './hooks/useLocalStorage';
 import { generateResponseStream } from './services/geminiService';
 import { INITIAL_GENERAL_RULES, CHANNEL_QUICK_LINKS, CONTEXT_LINKS, detectContext } from './constants';
+import CommandPalette from './components/CommandPalette';
 
 const App = () => {
   const [activeChannel, setActiveChannel] = useState('EO');
-  const [messages, setMessages] = useState({});
-  const [drafts, setDrafts] = useState({});
+  const [messages, setMessages] = useState<Record<string, any[]>>({});
+  const [drafts, setDrafts] = useLocalStorage<Record<string, string>>('gee_drafts', {});
   const [isLoading, setIsLoading] = useState(false);
-  const [coreRules, setCoreRules] = useState(() => localStorage.getItem('core_rules') || INITIAL_GENERAL_RULES);
+  const [coreRules, setCoreRules] = useState<string>(() => localStorage.getItem('core_rules') || INITIAL_GENERAL_RULES);
   const [connectionStatus, setConnectionStatus] = useState('connected');
   
-  // User Profile State with Persistence
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [manualContext, setManualContext] = useState<string | null>(null);
+  
+  const [isCoreRulesOpen, setIsCoreRulesOpen] = useState(false);
+  const [isSourceTruthOpen, setIsSourceTruthOpen] = useState(false);
+  const [isSustainabilityOpen, setIsSustainabilityOpen] = useState(false);
+
+  const [sourceTruthContent, setSourceTruthContent] = useLocalStorage('gee_source_truth', '');
+
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [userProfile, setUserProfile] = useLocalStorage('gee_user_profile', {
-    name: 'Admin User',
-    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?ixlib=rb-1.2.1&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80'
+    name: 'Support Agent',
+    avatar: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?ixlib=rb-1.2.1&auto=format&fit=crop&w=256&h=256&q=80',
+    theme: 'default',
+    mode: 'system'
   });
 
-  // API Key State
-  const [storedApiKey, setStoredApiKey] = useLocalStorage('gemini_api_key', '');
-  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
-  
-  // Effective Key Logic: Use Env Var if present (Dev/Build), otherwise use Stored Key (Runtime/Embed)
-  const effectiveApiKey = process.env.API_KEY || storedApiKey;
+  const [brandLogo, setBrandLogo] = useLocalStorage<string | undefined>('gee_brand_logo', undefined);
 
-  const abortControllerRef = useRef(null);
+  const isAdmin = true;
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     localStorage.setItem('core_rules', coreRules);
   }, [coreRules]);
 
-  // Check for API Key on mount
   useEffect(() => {
-      if (!effectiveApiKey) {
-          setIsApiKeyModalOpen(true);
-      } else {
-          setIsApiKeyModalOpen(false);
-      }
-  }, [effectiveApiKey]);
+    const root = window.document.documentElement;
+    const mode = userProfile.mode || 'system';
 
-  const handleApiKeySubmit = (key) => {
-      setStoredApiKey(key);
-      setIsApiKeyModalOpen(false);
-  };
+    const applyTheme = () => {
+        if (mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            root.classList.add('dark');
+        } else {
+            root.classList.remove('dark');
+        }
+    };
+
+    applyTheme();
+
+    if (mode === 'system') {
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        mediaQuery.addEventListener('change', applyTheme);
+        return () => mediaQuery.removeEventListener('change', applyTheme);
+    }
+  }, [userProfile.mode]);
 
   const getCurrentMessages = () => messages[activeChannel] || [];
 
-  const addMessage = (channel, message) => {
+  const addMessage = (channel: string, message: any) => {
     setMessages(prev => ({
       ...prev,
       [channel]: [...(prev[channel] || []), message]
     }));
   };
 
-  // Context Detection Logic
-  const getDetectedContext = () => {
-    const channelMessages = messages[activeChannel] || [];
-    if (channelMessages.length === 0) return null;
-    const lastUserMsg = [...channelMessages].reverse().find(m => m.sender === 'user');
-    if (!lastUserMsg) return null;
-    return detectContext(lastUserMsg.text);
+  const channelMessages = messages[activeChannel] || [];
+  const lastUserMsg = [...channelMessages].reverse().find(m => m.sender === 'user');
+  const lastUserText = lastUserMsg ? lastUserMsg.text : '';
+  const currentDraft = drafts[activeChannel] || '';
+
+  const detectedContext = useMemo(() => {
+      if (manualContext) return manualContext;
+      const textToAnalyze = currentDraft.length > 5 ? currentDraft : lastUserText;
+      if (!textToAnalyze) return null;
+      return detectContext(textToAnalyze);
+  }, [manualContext, lastUserText, currentDraft, activeChannel]);
+
+  useEffect(() => {
+      setManualContext(null);
+  }, [activeChannel]);
+
+  // Auto-popup sustainability report once daily
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const lastPopupDate = localStorage.getItem('last_sustainability_popup');
+    
+    if (lastPopupDate !== today) {
+      const timer = setTimeout(() => {
+        setIsSustainabilityOpen(true);
+        localStorage.setItem('last_sustainability_popup', today);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  const getContextLinks = () => {
+      if (detectedContext && CONTEXT_LINKS[detectedContext as keyof typeof CONTEXT_LINKS]) {
+          return CONTEXT_LINKS[detectedContext as keyof typeof CONTEXT_LINKS];
+      }
+      return [];
   };
 
-  const detectedContext = getDetectedContext();
-
-  const getQuickLinks = () => {
-    const defaultLinks = CHANNEL_QUICK_LINKS[activeChannel] || [];
-    if (detectedContext && CONTEXT_LINKS[detectedContext]) {
-        const contextLinks = CONTEXT_LINKS[detectedContext];
-        const combined = [...contextLinks, ...defaultLinks];
-        const unique = combined.filter((link, index, self) =>
-            index === self.findIndex((t) => (
-                t.url === link.url
-            ))
-        );
-        return unique;
-    }
-    return defaultLinks;
+  const getChannelLinks = () => {
+      return CHANNEL_QUICK_LINKS[activeChannel as keyof typeof CHANNEL_QUICK_LINKS] || [];
   };
 
-  const handleSendMessage = async (text) => {
-    if (!effectiveApiKey) {
-        setIsApiKeyModalOpen(true);
-        return;
-    }
-
+  const handleSendMessage = async (text: string, attachments = [], formatOverride = null) => {
     setDrafts(prev => ({ ...prev, [activeChannel]: '' }));
 
-    // Use dynamic profile info
+    const currentChan = activeChannel; // Capture channel in closure
     const userMsg = { 
         id: Date.now(), 
         sender: 'user', 
         name: userProfile.name, 
         avatar: userProfile.avatar, 
-        text 
+        text: text,
+        attachments: attachments
     };
-    addMessage(activeChannel, userMsg);
+    
+    addMessage(currentChan, userMsg);
     setIsLoading(true);
     setConnectionStatus('connecting');
 
-    if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-    }
+    if (abortControllerRef.current) abortControllerRef.current.abort();
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
 
     try {
-        const currentHistory = (messages[activeChannel] || [])
+        const historyData = (messages[currentChan] || [])
             .map(m => `${m.sender === 'user' ? 'User' : 'AI'}: ${m.text}`)
             .join('\n');
-            
+        
+        const formatToUse = formatOverride || currentChan;
+
         const stream = await generateResponseStream(
             text, 
-            activeChannel, 
-            currentHistory, 
+            formatToUse, 
+            historyData, 
             coreRules, 
-            (messages[activeChannel] || []).length === 0,
-            effectiveApiKey,
-            signal
+            (messages[currentChan] || []).length === 0,
+            signal,
+            attachments,
+            detectedContext,
+            sourceTruthContent
         );
         
         setConnectionStatus('connected');
@@ -132,7 +161,8 @@ const App = () => {
         let aiResponseText = '';
         const aiMsgId = Date.now() + 1;
         
-        addMessage(activeChannel, { 
+        // Initial placeholder for AI message
+        addMessage(currentChan, { 
             id: aiMsgId, 
             sender: 'ai', 
             name: 'Gee', 
@@ -140,41 +170,34 @@ const App = () => {
             text: '' 
         });
 
-        if (stream) {
-            for await (const chunk of stream) {
-                if (signal.aborted) break; 
-
-                const chunkText = chunk.text; 
-                if (chunkText) {
-                    aiResponseText += chunkText;
-                    
-                    setMessages(prev => {
-                        const channelMsgs = prev[activeChannel] || [];
-                        const updatedMsgs = channelMsgs.map(msg => 
-                            msg.id === aiMsgId ? { ...msg, text: aiResponseText } : msg
-                        );
-                        return { ...prev, [activeChannel]: updatedMsgs };
-                    });
-                }
+        // Loop through native stream chunks
+        for await (const chunk of stream) {
+            if (signal.aborted) break;
+            const chunkText = chunk.text;
+            if (chunkText) {
+                aiResponseText += chunkText;
+                setMessages(prev => {
+                    const channelMsgs = prev[currentChan] || [];
+                    const updatedMsgs = channelMsgs.map(msg => 
+                        msg.id === aiMsgId ? { ...msg, text: aiResponseText } : msg
+                    );
+                    return { ...prev, [currentChan]: updatedMsgs };
+                });
             }
         }
 
-    } catch (error) {
-        if (error.name === 'AbortError') {
-            console.log('Generation stopped by user');
+    } catch (error: any) {
+        if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+            console.log('Generation stopped');
         } else {
-            console.error("Generation failed", error);
-            const errorText = error.message || "I encountered an error. Please check your API key or try again.";
-            if (errorText.includes("Connection Blocked") || errorText.includes("Network or request error")) {
-                 setConnectionStatus('error');
-            }
-
-            addMessage(activeChannel, { 
+            console.error("Stream Error", error);
+            setConnectionStatus('error');
+            addMessage(currentChan, { 
                 id: Date.now() + 1, 
                 sender: 'ai', 
                 name: 'System Error', 
                 avatar: 'https://ui-avatars.com/api/?name=Error&background=ef4444&color=fff&rounded=true&bold=true&size=128', 
-                text: `**Error:** ${errorText}` 
+                text: `**Error:** ${error.message || 'Unknown failure'}` 
             });
         }
     } finally {
@@ -184,65 +207,91 @@ const App = () => {
   };
 
   const handleStopGeneration = () => {
-      if (abortControllerRef.current) {
-          abortControllerRef.current.abort();
-          setIsLoading(false);
-      }
+      if (abortControllerRef.current) abortControllerRef.current.abort();
+      setIsLoading(false);
   };
 
   const handleClearChat = () => {
       setMessages(prev => ({ ...prev, [activeChannel]: [] }));
+      setManualContext(null);
   };
   
   const handleRegenerate = () => {
       const currentMsgs = messages[activeChannel] || [];
       const lastUserMsg = [...currentMsgs].reverse().find(m => m.sender === 'user');
-      if (lastUserMsg) {
-          handleSendMessage(lastUserMsg.text);
-      }
+      if (lastUserMsg) handleSendMessage(lastUserMsg.text, lastUserMsg.attachments || []);
   };
   
-  const handleDraftChange = (text) => {
+  const handleDraftChange = (text: string) => {
       setDrafts(prev => ({ ...prev, [activeChannel]: text }));
+  };
+
+  const handleQuickSummary = () => {
+      handleSendMessage("Generate a Quick Summary of the current conversation.", [], 'QS');
   };
 
   const canRegenerate = (messages[activeChannel] || []).length > 0;
 
   return (
-    <div className="flex h-screen text-zinc-900 dark:text-zinc-200 font-sans overflow-hidden">
+    <div className={`flex h-screen text-zinc-900 dark:text-zinc-200 font-sans overflow-hidden relative ${userProfile?.theme || ''}`}>
+      <CommandPalette 
+        isOpen={false} 
+        onClose={() => {}} 
+        onCommand={(cmd: string) => {
+             if (cmd === 'clear') handleClearChat();
+             if (cmd.startsWith('channel:')) setActiveChannel(cmd.split(':')[1]);
+             if (cmd === 'settings') setIsProfileModalOpen(true);
+             if (cmd === 'rules') setIsCoreRulesOpen(true);
+        }}
+        activeChannel={activeChannel}
+      />
+
+      {isMobileSidebarOpen && (
+          <div 
+            className="fixed inset-0 bg-black/50 z-30 md:hidden backdrop-blur-sm transition-opacity"
+            onClick={() => setIsMobileSidebarOpen(false)}
+          />
+      )}
+
       <Sidebar 
         activeChannel={activeChannel} 
-        onChannelSelect={setActiveChannel} 
+        onChannelSelect={(ch: string) => { setActiveChannel(ch); setIsMobileSidebarOpen(false); }} 
         connectionStatus={connectionStatus}
-        quickLinks={getQuickLinks()}
+        contextLinks={getContextLinks()}
+        channelLinks={getChannelLinks()}
         userProfile={userProfile}
         onEditProfile={() => setIsProfileModalOpen(true)}
         onClearChat={handleClearChat}
+        onOpenRules={() => setIsCoreRulesOpen(true)}
+        onOpenSourceTruth={() => setIsSourceTruthOpen(true)}
+        onOpenSustainability={() => setIsSustainabilityOpen(true)}
+        isOpen={isMobileSidebarOpen}
+        onClose={() => setIsMobileSidebarOpen(false)}
+        brandLogo={brandLogo}
+        detectedContext={detectedContext}
       />
       
-      <main className="flex-1 min-w-0 relative flex flex-col z-0 transition-all duration-300">
-         {activeChannel === 'CR' ? (
-             <CoreRulesPanel 
-                rules={coreRules} 
-                onUpdateRules={setCoreRules}
-                isLoading={isLoading}
-                apiKey={effectiveApiKey}
-             />
-         ) : (
-            <ChatPanel 
-                activeChannel={activeChannel}
-                messages={getCurrentMessages()}
-                isLoading={isLoading}
-                onSendMessage={handleSendMessage}
-                onStopGeneration={handleStopGeneration}
-                onClearChat={handleClearChat}
-                onRegenerate={handleRegenerate}
-                canRegenerate={canRegenerate}
-                draft={drafts[activeChannel] || ''}
-                onDraftChange={handleDraftChange}
-                detectedContext={detectedContext}
-            />
-         )}
+      <main className="flex-1 min-w-0 relative flex flex-col z-0 transition-all duration-300 h-full">
+        <ChatPanel 
+            activeChannel={activeChannel}
+            messages={getCurrentMessages()}
+            isLoading={isLoading}
+            onSendMessage={handleSendMessage}
+            onStopGeneration={handleStopGeneration}
+            onClearChat={handleClearChat}
+            onRegenerate={handleRegenerate}
+            canRegenerate={canRegenerate}
+            draft={drafts[activeChannel] || ''}
+            onDraftChange={handleDraftChange}
+            detectedContext={detectedContext}
+            onManualContextChange={setManualContext}
+            isLimitReached={false}
+            onToggleSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+            onOpenSustainability={() => setIsSustainabilityOpen(true)}
+            brandLogo={brandLogo}
+            onQuickSummary={handleQuickSummary}
+            isAdmin={isAdmin}
+        />
       </main>
 
       <ProfileSettingsModal 
@@ -250,11 +299,31 @@ const App = () => {
         onClose={() => setIsProfileModalOpen(false)}
         userProfile={userProfile}
         onSave={setUserProfile}
+        onDisconnect={() => {}} 
+        isAdmin={isAdmin}
+        brandLogo={brandLogo}
+        onSaveBrandLogo={setBrandLogo}
+      />
+
+      <CoreRulesModal 
+        isOpen={isCoreRulesOpen}
+        onClose={() => setIsCoreRulesOpen(false)}
+        rules={coreRules}
+        onUpdateRules={setCoreRules}
+        readOnly={false}
       />
       
-      {isApiKeyModalOpen && (
-          <ApiKeyModal onSubmit={handleApiKeySubmit} />
-      )}
+      <SourceTruthModal
+        isOpen={isSourceTruthOpen}
+        onClose={() => setIsSourceTruthOpen(false)}
+        initialContent={sourceTruthContent}
+        onSave={setSourceTruthContent}
+      />
+
+      <SustainabilityModal 
+        isOpen={isSustainabilityOpen}
+        onClose={() => setIsSustainabilityOpen(false)}
+      />
     </div>
   );
 };

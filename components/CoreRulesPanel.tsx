@@ -16,7 +16,8 @@ const RulesHeader = () => (
     </header>
 );
 
-const CoreRulesPanel = ({ rules, onUpdateRules, isLoading, apiKey }) => {
+// Removed apiKey from props as it is now handled via process.env.API_KEY in the service
+const CoreRulesPanel = ({ rules, onUpdateRules, isLoading, readOnly }) => {
     const [instruction, setInstruction] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
     const [feedback, setFeedback] = useState(null);
@@ -27,7 +28,8 @@ const CoreRulesPanel = ({ rules, onUpdateRules, isLoading, apiKey }) => {
         setFeedback(null);
         
         try {
-            const result = await generateUpdatedRules(instruction, rules, apiKey);
+            // Removed apiKey argument as the service now handles it internally
+            const result = await generateUpdatedRules(instruction, rules);
             if (result.error) {
                 setFeedback({ type: 'error', message: result.error });
             } else {
@@ -50,7 +52,17 @@ const CoreRulesPanel = ({ rules, onUpdateRules, isLoading, apiKey }) => {
                 <div className="max-w-4xl mx-auto space-y-6">
                     
                     {/* Instruction Input */}
-                    <div className="bg-white/40 dark:bg-white/5 border border-white/40 dark:border-white/10 rounded-3xl p-6 shadow-lg backdrop-blur-md">
+                    <div className="relative bg-white/40 dark:bg-white/5 border border-white/40 dark:border-white/10 rounded-3xl p-6 shadow-lg backdrop-blur-md overflow-hidden">
+                        {readOnly && (
+                            <div className="absolute inset-0 bg-zinc-50/60 dark:bg-black/60 backdrop-blur-sm z-20 flex items-center justify-center flex-col text-center p-8">
+                                <div className="w-12 h-12 bg-zinc-200 dark:bg-zinc-800 rounded-full flex items-center justify-center mb-3">
+                                    <svg className="w-6 h-6 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                                </div>
+                                <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">Admin Access Required</h3>
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-xs">Standard users utilize the globally configured persona. To modify Core Rules, please upgrade to an Admin workspace.</p>
+                            </div>
+                        )}
+
                         <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-2 drop-shadow-sm">Modify Core Rules</h3>
                         <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
                             Describe how you want to change the AI's behavior. The AI will rewrite the rules for you.
@@ -61,6 +73,7 @@ const CoreRulesPanel = ({ rules, onUpdateRules, isLoading, apiKey }) => {
                                 onChange={(e) => setInstruction(e.target.value)}
                                 placeholder="e.g., 'Make the tone more formal', 'Always ask for order ID'..."
                                 aria-label="Rule modification instruction"
+                                maxLength={2000}
                                 className="flex-1 bg-white/50 dark:bg-black/20 border border-white/40 dark:border-white/10 rounded-xl px-4 py-3 text-zinc-900 dark:text-zinc-100 text-sm focus:ring-2 focus:ring-zinc-400 dark:focus:ring-zinc-600 focus:outline-none resize-none h-36 placeholder-zinc-500/70 backdrop-blur-sm"
                             />
                             <button

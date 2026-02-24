@@ -1,303 +1,446 @@
 
-
-
-
-
 export const FORMATS = [
-  { id: 'EO', name: 'Email & Record', description: 'Generates the customer email draft PLUS the full internal investigation record.' },
-  { id: 'CL', name: 'Chat/RAC Notes', description: 'Simplified outline in a structured list format.' },
-  { id: 'INV', name: 'Investigation Notes', description: 'Stand-alone internal record. Use for Chats, Transfers, or Risk reviews (No Email).' },
-  { id: 'QS', name: 'Short Summary', description: 'Brief summary focused on key points.' },
-  { id: 'CF', name: 'Consult', description: 'Structured format for consulting specific departments.' },
-  { id: 'CR', name: 'Core Rules', description: 'View and edit the AI\'s core rules and instructions.' },
+  { id: 'EO', name: 'EMAIL + INVESTIGATION', description: 'Generates the customer email draft PLUS the full internal investigation record.' },
+  { id: 'CL', name: 'CHAT/RAC NOTES', description: 'Simplified outline in a structured list format.' },
+  { id: 'INV', name: 'INVESTIGATION NOTES', description: 'Stand-alone internal record. Use for Chats, Transfers, or Risk reviews (No Email).' },
+  { id: 'QS', name: 'SHORT SUMMARY', description: 'Brief summary focused on key points.' },
+  { id: 'CF', name: 'CONSULT', description: 'Structured format for consulting specific departments.' },
+  { id: 'EM', name: 'EMPATHY STATEMENTS', description: 'Generate sincere, personalized empathy statements.' },
+  { id: 'ACK', name: 'ACKNOWLEDGEMENT', description: 'Draft a professional acknowledgement message.' },
+  { id: 'CR', name: 'CORE RULES', description: 'View and edit the AI\'s core rules and instructions.' },
 ];
-
-export const CHANNEL_QUICK_LINKS = {
-    EO: [
-        { name: 'Stripe Docs', url: 'https://docs.stripe.com/' },
-        { name: 'Dash: Payments', url: 'https://dashboard.stripe.com/payments' },
-        { name: 'Dash: Payouts', url: 'https://dashboard.stripe.com/payouts' },
-        { name: 'Dash: Settings', url: 'https://dashboard.stripe.com/settings' }
-    ],
-    INV: [
-        { name: 'Public Docs', url: 'https://docs.stripe.com/' },
-        { name: 'Internal: Lumos', url: '#' }, // Placeholder for internal tool
-        { name: 'Internal: Confluence', url: '#' }, // Placeholder for internal tool
-        { name: 'Support Articles', url: 'https://support.stripe.com/' }
-    ],
-    CL: [
-        { name: 'API Reference', url: 'https://docs.stripe.com/api' },
-        { name: 'Error Codes', url: 'https://docs.stripe.com/error-codes' },
-        { name: 'Dash: Events', url: 'https://dashboard.stripe.com/events' },
-        { name: 'Dash: Logs', url: 'https://dashboard.stripe.com/logs' }
-    ],
-    QS: [
-        { name: 'Agent Cases', url: '#' }, // Placeholder
-        { name: 'Dash: Home', url: 'https://dashboard.stripe.com/' },
-        { name: 'Stripe Status', url: 'https://status.stripe.com/' }
-    ],
-    CF: [
-        { name: 'Org Chart', url: '#' }, // Placeholder
-        { name: 'Team Directory', url: '#' }, // Placeholder
-        { name: 'Escalation Paths', url: '#' } // Placeholder
-    ]
-};
-
-export const CONTEXT_LINKS = {
-    payouts: [
-        { name: 'Docs: Payouts', url: 'https://docs.stripe.com/payouts' },
-        { name: 'Dash: Payouts', url: 'https://dashboard.stripe.com/payouts' },
-        { name: 'Docs: Rolling Schedule', url: 'https://docs.stripe.com/payouts#standard-payout-timing' }
-    ],
-    disputes: [
-         { name: 'Docs: Disputes', url: 'https://docs.stripe.com/disputes' },
-         { name: 'Dash: Disputes', url: 'https://dashboard.stripe.com/disputes' },
-         { name: 'Docs: Prevention', url: 'https://docs.stripe.com/disputes/prevention' }
-    ],
-    checkout: [
-         { name: 'Docs: Checkout', url: 'https://docs.stripe.com/payments/checkout' },
-         { name: 'Dash: Branding', url: 'https://dashboard.stripe.com/settings/branding' },
-         { name: 'Docs: Customization', url: 'https://docs.stripe.com/payments/checkout/customization' }
-    ],
-    radar: [
-        { name: 'Docs: Radar', url: 'https://docs.stripe.com/radar' },
-        { name: 'Dash: Radar', url: 'https://dashboard.stripe.com/radar' },
-        { name: 'Docs: Rules', url: 'https://docs.stripe.com/radar/rules' }
-    ],
-    billing: [
-        { name: 'Docs: Billing', url: 'https://docs.stripe.com/billing' },
-        { name: 'Dash: Invoices', url: 'https://dashboard.stripe.com/invoices' },
-        { name: 'Docs: Subs', url: 'https://docs.stripe.com/billing/subscriptions/overview' }
-    ],
-    connect: [
-        { name: 'Docs: Connect', url: 'https://docs.stripe.com/connect' },
-        { name: 'Dash: Connect', url: 'https://dashboard.stripe.com/connect/accounts' }
-    ]
-};
-
-export const detectContext = (text) => {
-    if (!text) return null;
-    const t = text.toLowerCase();
-    if (t.includes('payout') || t.includes('deposit') || t.includes('funds') || t.includes('bank') || t.includes('schedule')) return 'payouts';
-    if (t.includes('dispute') || t.includes('chargeback') || t.includes('fraud') || t.includes('do_not_honor') || t.includes('inquiry')) return 'disputes';
-    if (t.includes('checkout') || t.includes('payment page') || t.includes('hosted') || t.includes('branding')) return 'checkout';
-    if (t.includes('radar') || t.includes('risk') || t.includes('rule') || t.includes('block') || t.includes('review')) return 'radar';
-    if (t.includes('invoice') || t.includes('subscription') || t.includes('plan') || t.includes('recurring') || t.includes('cycle')) return 'billing';
-    if (t.includes('connect') || t.includes('express') || t.includes('custom account') || t.includes('platform')) return 'connect';
-    return null;
-};
-
-export const SYSTEM_PROMPT = `You are a helpful assistant for Gee, a senior, solution-oriented support agent at Stripe.
-Your mission is to generate accurate, empathetic, and well-structured support analyses and communication drafts for Gee to use.
-You must write all user-facing communication drafts from Gee's perspective, as if you were Gee. You are drafting the response FOR Gee.
-You must always use a warm, human-like, professional tone and prevent dissatisfaction (DSAT) through Positive Scripting and Never Blaming.
-
-**QA ROLE:** You are also your own Quality Assurance (QA) Manager. Before you output any final text, you must internally review your draft to ensure it strictly adheres to the "Universal Positive Language" and "Knowledge Verification" rules. You must catch and correct any negative phrasing (e.g., "unfortunately") or hallucinations before they reach the final output.
-`;
-
-export const INITIAL_GENERAL_RULES = `
-# Core Persona & Voice
-- **First-Person Perspective ("I"):** You are Gee. In ALL formats (Internal Notes, Email Outlines, Summaries), use "I" to refer to yourself. **NEVER** refer to yourself as "Gee", "the agent", "the support rep", or in the third person.
-- **Summary Field Rule:** In the "**Summary**" field, explicitly state that the user contacted **Stripe**. Do NOT use "I", "me", or "Gee" to refer to the recipient of the contact in this specific field. (e.g., "User contacted Stripe regarding..." NOT "User contacted me..." or "User contacted Gee...").
-- **"Steps I took" Definition:**
-  - **Format:** Strictly bullet points. Use brief fragments (no full sentences).
-  - **Content:** Only significant investigative actions (e.g., "Verified transaction," "Checked logs," "Confirmed error code").
-  - **Anti-Robot:** Do NOT list meta-actions like "Drafted email," "Read documentation," "Understood user issue," or "Analyzed tone." Sound like a busy human agent, not an AI.
-- **Internal Documentation:** When writing internal notes (INV, CL, QS, CF), write as if you personally performed the investigation. Example: "I verified the logs" or "I checked the dashboard," NOT "Gee verified..." or "The agent checked..."
-- Your tone should be warm, human-like, and professional.
-- **Universal Positive Language:** You must strictly avoid words with negative meanings, negative connotations, or "bad luck" implications across varied cultural contexts. This is PARAMOUNT for Email Outlines.
-  - **Forbidden Words:** Do not use: "unfortunately", "however", "but", "failed", "wrong", "mistake", "problem", "trouble", "issue", "can't", "unable", "denied", "rejected", "apologize for the inconvenience", "impossible", "not available".
-  - **Softener Rule:** Avoid blunt "No" or "Not available" statements. Even neutral negatives must be softened or framed professionally.
-    - *Bad:* "This feature is not available." -> *Good:* "This feature is currently not supported." or "This functionality requires [X] setup."
-    - *Bad:* "You don't have permission." -> *Good:* "Accessing this section requires [Role] permissions."
-  - **Correct Framing:** Reframe everything positively or neutrally. Focus entirely on what IS possible or what the system IS designed to do.
-    - *Bad:* "The payment failed." -> *Good:* "The payment status is declined."
-    - *Bad:* "I can't do that." -> *Good:* "What I can do is..." or "The system is designed to..."
-    - *Bad:* "There is a problem with your account." -> *Good:* "We need to address a setting on your account."
-- Apply appropriate empathy based on the user's situation.
-
-# Handling Pushback & Resolution Refusal
-- **Validation without Concession:** When a user rejects a correct resolution or policy, validate their frustration *without* agreeing that the policy is wrong.
-- **The "Contextual Why":** If they push back, you must explain the *reasoning* deeper. Is it a banking regulation? A card network rule? A security measure?
-- **Firm Compassion:** Do not waffle. If the answer is "No", do not say "I'll check again" if you know the answer won't change.
-- **De-escalation:** If the user gets aggressive or demands a manager, re-establish YOUR ownership.
-
-# Global Language & Comprehension (Simple English)
-- **Simplicity is Key:** Use simple, clear, and standard English.
-- **No Idioms or Slang:** Strictly avoid idioms, metaphors, cultural references, or colloquialisms.
-- **Translation-Ready:** Write as if the user will run your text through Google Translate.
-
-# Knowledge Verification & Search Grounding (The "Truth" Layer)
-- **Mandatory Research:** You have access to Google Search. You MUST use it to verify technical details, fees, error codes, and policy limits.
-- **Invisible Mechanism (Internal Persona):** NEVER mention "Google Search" or "internet search" in your text output. Say "I checked Stripe documentation", "I consulted our internal resources", or "I verified the policy".
-- **Approved Sources:**
-  1. **Technical/Product:** \`site:docs.stripe.com\` (Primary)
-  2. **Account/Troubleshooting:** \`site:support.stripe.com\` (Secondary)
-- **Link Integrity:** Only provide links that you have verified exist via your search knowledge base.
-
-# Communication Excellence (Best Practices)
-- **The "Why" and "How":** Never give a flat "No". Always explain *why* a limitation exists and *how* to move forward.
-- **Anticipatory Service:** Answer the question the user *didn't* ask but will need to know next.
-- **Closing with Value:** Never end with a generic "Let me know." End with a specific offer of help: "Please reply directly to this email if the settings page remains unclear, and I will walk you through it."
-- **Mandatory Help Closing:** ALL emails must end with a variation of "Please let me know if there is anything else I can help you with." or "I'm happy to help if you have more questions." regardless of whether the issue is resolved or not.
-
-# Emotional Connection (Acknowledge & Prioritize)
-- **Forward-Looking Empathy:** Validate the *importance of their goal* rather than the *negativity of the situation*.
-- **Avoid Negative Anchors:** Do not dwell on or repeat negative words back to the user.
-- **Prioritize:** Demonstrate urgency and ownership. Use "I" statements.
-- **Resolve:** Ensure the path to solution is crystal clear.
-
-# Empowerment & Education (Self-Service)
-- **Priority Resolution:** The user's immediate specific request MUST be resolved fully before any self-service resources are mentioned.
-- **Conditional Education:** ONLY provide guides/docs if the user *does not know* or has a *misunderstanding*. Do not "educate" a user who already knows the answer.
-- **Efficiency Framing:** When offering self-service options, frame them as a tool for the user's *future efficiency*.
-- **Direct & Relevant:** Provide the exact deep link to the specific section.
-
-# Link Guidelines
-- **Dashboard Links:** You MUST include specific \`https://dashboard.stripe.com/...\` deep links whenever the user needs to check a status, change a setting, or view a transaction.
-- **Provide clean URLs. Do NOT wrap links in parentheses (), square brackets [], or backticks \`.**
-- **Full Visibility:** Always display the complete URL (starting with https://).
-
-# Formatting Guidelines:
-- Use bold for section titles (e.g., **Summary**).
-- **Strictly No Bullets in Email Body:** In the Email (EO) format, the text between "=== Email ===" and "=== End ===" must be written in **paragraphs only**. Do not use bullet points or numbered lists in the email response to the customer.
-`;
 
 export const FORMAT_DEFINITIONS = {
   EO: `
-    # RULES
-    1. Email Body: Paragraphs only (No bullets). Warm tone.
-    2. Closing: Must offer further help.
-    3. Internal Record: Strict format. "Steps I took" must be brief fragments.
-    4. Auth/Verification: Default to N/A.
-    5. Strategy Fields: Keep "What user knows/needs/do" extremely brief.
+**Case ID:** [CASE-XXXXX]
 
-    # TEMPLATE
-    **Summary:**
-    === Email ===
-    (Draft email here)
-    === End ===
-    **-- Internal Record --**
-    **Internal Note checklist**
-    **Consent to be recorded:** N/A
-    **Authentication/Verification PIN/PII?:** N/A
-    **User-Account Type:**
-    **User-Account ID:**
-    **Have you checked all related cases?**
-    **Have you read through the entire thread?**
+**SUMMARY:** [Brief description of issue and resolution. NO STEPS/PLANS.]
 
-    **List all user's concerns/inquiries:**
-    **Topic:**
-    **Summary of the issue:**
-    **Steps I took:** (Brief bullets)
-    **Check Lumos (RP used):**
-    **Check Confluence:**
-    **Check Public Documentation:**
-    **Specific Dashboard link:**
-    **Final Outcome:**
-    **Why is the case open/pending:**
-    **Distressed User Analysis:**
-    
-    **Strategy (Brief):**
-    **What the user already knows:**
-    **What the user needs to know:**
-    **What the user needs to do:**
-    **What the email includes:**
+**ANALYSIS**
+**Steps I took:**
+- [Step 1]
+- [Step 2]
 
-    **🤖 QA:** [x] No Negatives [x] Links Valid [x] Facts Verified [x] Tone Check [x] No Bullets
-    `,
+**Information the reply must include:**
+- [Key point 1]
+- [Key point 2]
+
+**Already know:** [What user already knows]
+**Need to know:** [New information for user]
+**To do:** [Next actions for user]
+
+**Outcome Summary:** [How the response resolves the issue]
+
+**DSAT analysis:**
+Tone: [Positive/Negative/Neutral] | Driver: [Driver Name] | Analysis: [Brief explanation]
+
+**Relevant documents:** [Link 1]
+
+**Subject:** [Concise, relevant subject line]
+
+**Email body:**
+[Greeting]
+
+[Empathy Statement - Must be the first sentence]
+
+[Paragraph 1]
+
+[Paragraph 2]
+
+[Closing]
+
+**Speculation:** [Analysis of possible causes]
+**Why is the case open/pending:** [Rationale]
+`,
   CL: `
-    # RULES
-    1. Brevity: Fragments only.
-    2. Steps: Only significant actions (Bullets).
-    3. Content: Factual record only.
+**Have you checked all related cases?:** YES/NO/NA
+**Have you read through the entire thread?:** YES/NO/NA
 
-    # TEMPLATE
-    **Have you checked all related related cases?:**
-    **Have you read through the entire thread?:**
-    **Summary of the issue:**
-    **Steps I took:** (Brief bullets)
-    **Relevant object IDs:**
-    **Final outcome:**
-    **Relevant documents:**
-    **Distressed User Analysis:**
-    **Why is the case open/pending:**
+**Summary of the issue:** [Brief 2-3 sentence summary. NO STEPS/PLANS.]
 
-    **🤖 QA:** [x] Brevity Check [x] Links Valid [x] Object IDs Verified
-    `,
+**Steps I took:**
+1. [Step 1 - Fragment style]
+2. [Step 2 - Fragment style]
+
+**Relevant object IDs:**
+- [ID 1]
+
+**Final outcome:** [Action taken]
+
+**Relevant documents:** [Link 1]
+
+**Speculation:** [Analysis]
+**Why is the case open/pending:** [Rationale]
+
+**Distressed User Analysis:**
+Tone: [Type] | Driver: [Driver Name] | Analysis: [Brief explanation]
+`,
   INV: `
-    # RULES
-    1. Brevity: Fragments only.
-    2. Fields: All mandatory. Use N/A if empty.
-    3. Checklist: YES/NO/NA.
-    4. Links: URL/Name or N/A.
-    5. Auth/Verification: Default to N/A.
+**Investigation Notes checklist**
+**Consent to be recorded:** [YES/NO/NA]
+**Authentication/Verification PIN/PII?:** [PIN/PII]
+**User-Account Type:** [Type or NA]
+**User-Account ID:** [acct_xxx or NA]
+**Have you checked all related cases?:** [YES/NO]
+**Have you read through the entire thread?:** [YES/NO]
 
-    # TEMPLATE
-    **Internal Note checklist**
-    **Consent to be recorded:** N/A
-    **Authentication/Verification PIN/PII?:** N/A
-    **User-Account Type:**
-    **User-Account ID:**
-    **Have you checked all related cases?**
-    **Have you read through the entire thread?**
+**List all user's concerns/inquiries**
+**Topic:** [Topic Name]
 
-    **List all user's concerns/inquiries:**
-    **Topic:**
-    **Summary of the issue:**
-    **Steps I took:** (Brief bullets)
-    **Check Lumos (RP used):**
-    **Check Confluence:**
-    **Check Public Documentation:**
-    **Specific Dashboard link:**
-    **Final Outcome:**
-    **Why is the case open/pending:**
-    **Distressed User Analysis:**
-    **Information the reply must include:**
+**Summary of the issue:** [Full summary. NO STEPS/PLANS.]
 
-    **🤖 QA:** [x] Checklist [x] Data [x] Steps [x] Links
-    `,
+**Steps I took:**
+- [Investigative Step 1]
+- [Investigative Step 2]
+- **Check Lumos (RP used):** [Name or NA]
+- **Check Confluence:** [Link or NA]
+- **Specific Dashboard link:** [Public Link or NA]
+- **Check Public Documentation:** [Link or NA]
+
+**Final Outcome:** [Escalation / Resolution / Ask for information / Waiting for internal team actions] - [Summary details]
+
+**Why is the case open/pending:** [Rationale]
+**Speculation:** [Analysis]
+
+**Distressed User Analysis:**
+Tone: [Type] | Driver: [Driver Name] | Analysis: [Brief explanation]
+
+**Information the reply must include:**
+- [Point 1]
+`,
   QS: `
-    # RULES
-    1. Labels: Telegraphic (Short).
-    2. Focus: Key points only.
+**Summary of the issue:** [Concise analysis. NO STEPS/PLANS.]
 
-    # TEMPLATE
-    **Summary:**
-    **Case Link:**
-    **Case ID:**
-    **Acct ID:**
-    **Plat ID:**
-    **Conn ID:**
-    **Talking Point:**
-    **Resources:**
-    **IDs:**
+**Case link:** [Link or NA]
+**Case ID:** [ID or NA]
+**Account ID:** [ID or NA]
+**User-Account ID Platform:** [ID or NA]
+**User-Account ID Connected Account:** [ID or NA]
 
-    **🤖 QA:** [x] Facts Verified [x] Accuracy [x] Links Valid
-    `,
+**Speculation:** [Analysis]
+
+**What Can I tell the user?:**
+[Response text]
+
+**Relevant Stripe resources:** [Links]
+**Relevant IDs:** [List of IDs]
+**Why is the case open/pending:** [Rationale]
+
+**Distressed User Analysis:**
+Tone: [Type] | Driver: [Driver Name] | Analysis: [Brief explanation]
+`,
   CF: `
-    # RULES
-    1. Labels: Telegraphic (Short).
-    2. Speculation: Allowed here.
+**Consult [Department] (Chat/RAC)**
 
-    # TEMPLATE
-    **Consult[Dept]:** (Platinum/ALO/US/RISK/SaaS) (Chat/RAC)
-    **Ticket:**
-    **IDs:**
-    **Issue:**
-    **Findings:**
-    **Speculation:**
+**Ticket Link:** [Link]
+**Object/Account ID(s):** [IDs]
 
-    **🤖 QA:** [x] Dept Verified [x] Concise [x] Speculation Marked
-    `,
-  CR: `This is not a generation format. This channel is for displaying and updating your core rules.`
+**User issue Summary:** [Analysis. NO STEPS/PLANS.]
+**Your Investigation:** [Analysis]
+**Speculation:** [Analysis]
+`,
+  EM: `
+**Empathy Statements:**
+1. [Statement 1]
+2. [Statement 2]
+3. [Statement 3]
+`,
+  ACK: `
+**Acknowledgement:**
+[Single paragraph acknowledgement text]
+`,
+  CR: `(Rules are edited via the specific modal interface)`
 };
 
 export const EMPTY_STATE_MESSAGES = {
-  EO: "Ready to draft an email? Paste the user's message or describe the situation. I'll generate a warm, policy-compliant response and the internal record.",
-  CL: "Paste the chat transcript or notes here. I'll extract the key facts and structure them into a clear timeline for your records.",
-  INV: "Start a formal investigation record. Provide the transaction details, user claims, and your findings. I'll format it for risk review or transfer.",
-  QS: "Need a quick summary? Paste the case details. I'll boil it down to the essential talking points and IDs.",
-  CF: "Consulting another department? Describe the issue and the specific questions you have. I'll format it for the specialist team.",
-  CR: "This channel is for modifying the AI's core instructions. Use this to refine my persona or update my rule set."
+  EO: "Paste the user's message. I'll generate a complete email draft and investigation record.",
+  CL: "Paste the chat transcript. I'll create a structured note for the RAC/Chat.",
+  INV: "Describe the case details. I'll document the full investigation steps.",
+  QS: "Paste text to summarize. I'll extract key points and IDs.",
+  CF: "Describe the problem. I'll format a consultation request.",
+  EM: "Paste the user's message. I'll generate 3-5 empathetic response options.",
+  ACK: "Paste the user's message. I'll draft a professional acknowledgement.",
+  CR: "Use the command palette or sidebar to configure core rules."
 };
+
+export const CHANNEL_QUICK_LINKS = {
+    EO: [
+        { name: 'Docs: Stripe Home', url: 'https://docs.stripe.com/' },
+        { name: 'Dashboard: Payments', url: 'https://dashboard.stripe.com/payments' },
+        { name: 'Dashboard: Settings', url: 'https://dashboard.stripe.com/settings' }
+    ],
+    INV: [
+        { name: 'Docs: Public Home', url: 'https://docs.stripe.com/' },
+        { name: 'Support: Articles', url: 'https://support.stripe.com/' },
+        { name: 'Policy: Data Retention', url: 'https://docs.stripe.com/security/data-retention' }
+    ],
+    CL: [
+        { name: 'Docs: API Reference', url: 'https://docs.stripe.com/api' },
+        { name: 'Docs: Error Codes', url: 'https://docs.stripe.com/error-codes' },
+        { name: 'Policy: Privacy Center', url: 'https://stripe.com/privacy-center' }
+    ],
+    QS: [
+        { name: 'Dashboard: Home', url: 'https://dashboard.stripe.com/' },
+        { name: 'Support: Status', url: 'https://status.stripe.com/' }
+    ],
+    CF: [
+        { name: 'Internal: Slack', url: 'https://slack.com/' }
+    ],
+    EM: [
+        { name: 'Docs: Stripe Home', url: 'https://docs.stripe.com/' }
+    ],
+    ACK: [
+        { name: 'Docs: Stripe Home', url: 'https://docs.stripe.com/' }
+    ]
+};
+
+// --- EXPANDED CONTEXT LINKS LIBRARY (Improved via Ecosystem Mind Map) ---
+export const CONTEXT_LINKS = {
+    payouts: [
+        { name: 'Docs: Payouts', url: 'https://docs.stripe.com/payouts' },
+        { name: 'Dashboard: Payouts', url: 'https://dashboard.stripe.com/payouts' },
+        { name: 'Docs: Instant Payouts', url: 'https://docs.stripe.com/payouts/instant-payouts' },
+        { name: 'Docs: Transfers/Payouts (Global)', url: 'https://docs.stripe.com/connect/payouts' },
+        { name: 'Dashboard: Settings', url: 'https://dashboard.stripe.com/settings/payouts' }
+    ],
+    disputes: [
+         { name: 'Docs: Disputes', url: 'https://docs.stripe.com/disputes' },
+         { name: 'Dashboard: Disputes', url: 'https://dashboard.stripe.com/disputes' },
+         { name: 'Docs: Disputed Subscriptions', url: 'https://docs.stripe.com/billing/subscriptions/disputes' },
+         { name: 'Docs: Responding', url: 'https://docs.stripe.com/disputes/responding' }
+    ],
+    checkout: [
+         { name: 'Docs: Checkout', url: 'https://docs.stripe.com/payments/checkout' },
+         { name: 'Docs: Payment Links (No-code)', url: 'https://docs.stripe.com/payment-links' },
+         { name: 'Docs: Elements (UI Components)', url: 'https://docs.stripe.com/payments/elements' },
+         { name: 'Docs: Embedded Checkout', url: 'https://docs.stripe.com/checkout/embedded/quickstart' }
+    ],
+    billing: [
+        { name: 'Docs: Billing', url: 'https://docs.stripe.com/billing' },
+        { name: 'Docs: MRR Analytics', url: 'https://docs.stripe.com/billing/analytics' },
+        { name: 'Docs: Test Clocks', url: 'https://docs.stripe.com/billing/testing/test-clocks' },
+        { name: 'Docs: Pricing Models', url: 'https://docs.stripe.com/products-prices/pricing-models' },
+        { name: 'Dashboard: Subscriptions', url: 'https://dashboard.stripe.com/subscriptions' }
+    ],
+    invoicing: [
+        { name: 'Docs: Invoicing', url: 'https://docs.stripe.com/invoicing' },
+        { name: 'Docs: New Invoice Editor', url: 'https://docs.stripe.com/invoicing/invoice-editor' },
+        { name: 'Docs: Hosted Invoice Page', url: 'https://docs.stripe.com/invoicing/hosted-invoice-page' },
+        { name: 'Docs: Auto-reconciliation', url: 'https://docs.stripe.com/invoicing/reconciliation' },
+        { name: 'Docs: Invoice Revisions', url: 'https://docs.stripe.com/invoicing/revisions' }
+    ],
+    connect: [
+        { name: 'Docs: Connect', url: 'https://docs.stripe.com/connect' },
+        { name: 'Docs: Application Fees', url: 'https://docs.stripe.com/connect/direct-charges#collecting-fees' },
+        { name: 'Docs: Platform Reserves', url: 'https://docs.stripe.com/connect/platform-reserves' },
+        { name: 'Docs: Onboarding (Custom/Express/Standard)', url: 'https://docs.stripe.com/connect/onboarding' },
+        { name: 'Dashboard: Connect Accounts', url: 'https://dashboard.stripe.com/connect/accounts' }
+    ],
+    tax: [
+        { name: 'Docs: Tax', url: 'https://docs.stripe.com/tax' },
+        { name: 'Docs: Sales Tax & VAT Automation', url: 'https://docs.stripe.com/tax/vat' },
+        { name: 'Docs: Stripe Billing Taxes', url: 'https://docs.stripe.com/tax/billing-integration' },
+        { name: 'Dashboard: Tax Settings', url: 'https://dashboard.stripe.com/settings/tax' }
+    ],
+    sigma: [
+        { name: 'Docs: Stripe Sigma', url: 'https://docs.stripe.com/sigma' },
+        { name: 'Docs: Billing Schema', url: 'https://docs.stripe.com/sigma/billing-schema' },
+        { name: 'Docs: Connect Schema', url: 'https://docs.stripe.com/sigma/connect-schema' },
+        { name: 'Docs: Sigma Templates', url: 'https://docs.stripe.com/sigma/templates' },
+        { name: 'Dashboard: Sigma', url: 'https://dashboard.stripe.com/sigma' }
+    ],
+    developers: [
+        { name: 'Docs: API Reference', url: 'https://docs.stripe.com/api' },
+        { name: 'Docs: Stripe CLI', url: 'https://docs.stripe.com/stripe-cli' },
+        { name: 'Docs: Stripe for VS Code', url: 'https://docs.stripe.com/vscode' },
+        { name: 'Docs: Search API', url: 'https://docs.stripe.com/search' },
+        { name: 'Docs: Webhooks', url: 'https://docs.stripe.com/webhooks' }
+    ],
+    money_management: [
+        { name: 'Docs: Issuing', url: 'https://docs.stripe.com/issuing' },
+        { name: 'Docs: Treasury (Financial Accounts)', url: 'https://docs.stripe.com/treasury' },
+        { name: 'Docs: Capital (Business Financing)', url: 'https://docs.stripe.com/capital' },
+        { name: 'Docs: Payouts v2 (Private Beta)', url: 'https://docs.stripe.com/payouts/v2' }
+    ],
+    other_products: [
+        { name: 'Docs: Atlas', url: 'https://docs.stripe.com/atlas' },
+        { name: 'Docs: Identity', url: 'https://docs.stripe.com/identity' },
+        { name: 'Docs: Financial Connections', url: 'https://docs.stripe.com/financial-connections' },
+        { name: 'Docs: Link', url: 'https://docs.stripe.com/link' },
+        { name: 'Docs: Climate', url: 'https://docs.stripe.com/climate' }
+    ],
+    integrations: [
+        { name: 'Docs: Partner Program', url: 'https://stripe.com/partners' },
+        { name: 'Docs: App Marketplace', url: 'https://marketplace.stripe.com/' },
+        { name: 'Docs: Data Migration Process', url: 'https://docs.stripe.com/migration' }
+    ],
+    radar: [
+        { name: 'Docs: Radar', url: 'https://docs.stripe.com/radar' },
+        { name: 'Docs: Authorization Boost', url: 'https://docs.stripe.com/radar/authorization-boost' },
+        { name: 'Docs: Risk Interventions', url: 'https://docs.stripe.com/radar/risk-interventions' },
+        { name: 'Dashboard: Radar Rules', url: 'https://dashboard.stripe.com/radar/rules' }
+    ]
+};
+
+// Weighted NLP Pattern Matching System for Context Detection
+const CONTEXT_PATTERNS = {
+    payouts: {
+        idPattern: /\b(po_|tr_)\w+/g,
+        keywords: ['payout', 'deposit', 'fund', 'bank', 'arrival', 'trace id', 'funds', 'movement'],
+        strongPhrases: ['missing payout', 'not received funds', 'transfer status', 'standard payout timing']
+    },
+    disputes: {
+        idPattern: /\b(dp_|du_|py_)\w+/g,
+        keywords: ['dispute', 'chargeback', 'fraud', 'evidence', 'lost', 'retrieval', 'reversal', 'stolen'],
+        strongPhrases: ['customer disputed', 'early fraud warning', 'subscription dispute', 'chargeback status']
+    },
+    checkout: {
+        idPattern: /\b(cs_|plink_)\w+/g,
+        keywords: ['checkout', 'payment link', 'buy button', 'elements', 'embedded', 'ui'],
+        strongPhrases: ['payment page link', 'checkout session', 'apple pay button', 'google pay button']
+    },
+    billing: {
+        idPattern: /\b(sub_|si_|price_)\w+/g,
+        keywords: ['subscription', 'recurring', 'plan', 'mrr', 'test clock', 'metered', 'proration', 'flat rate'],
+        strongPhrases: ['monthly recurring revenue', 'advance billing', 'test-clock session', 'billing cycle']
+    },
+    invoicing: {
+        idPattern: /\b(in_|li_)\w+/g,
+        keywords: ['invoice', 'editor', 'reconciliation', 'numbering', 'revisions', 'hosted invoice', 'troubleshooting'],
+        strongPhrases: ['invoice reconciliation', 'past due invoice', 'invoice editor issue', 'billable currency']
+    },
+    connect: {
+        idPattern: /\b(acct_|fee_)\w+/g,
+        keywords: ['connect', 'platform', 'onboarding', 'express', 'custom', 'application fee', 'reserve', 'cbsp'],
+        strongPhrases: ['onboarding verification', 'collecting fees', 'platform reserve balance', 'unified account']
+    },
+    tax: {
+        idPattern: null,
+        keywords: ['tax', 'vat', 'gst', 'sales tax', 'nexus', 'threshold', 'registration', 'billing tax'],
+        strongPhrases: ['tax registration', 'tax calculation', 'sales tax automation']
+    },
+    sigma: {
+        idPattern: null,
+        keywords: ['sigma', 'sql', 'query', 'schema', 'nomenclature', 'templates', 'billing schema', 'connect schema'],
+        strongPhrases: ['sigma report', 'sql query error', 'sigma schema docs']
+    },
+    developers: {
+        idPattern: /\b(req_|evt_|whsec_|sk_|pk_)\w+/g,
+        keywords: ['api', 'cli', 'sdk', 'webhook', 'vs code', 'versioning', 'search api', 'code samples'],
+        strongPhrases: ['api versioning', 'signature verification', 'cli command', 'webhook event']
+    },
+    money_management: {
+        idPattern: /\b(ic_|auth_|ba_)\w+/g,
+        keywords: ['issuing', 'treasury', 'capital', 'financing', 'recipient', 'virtual card'],
+        strongPhrases: ['business financing', 'treasury account', 'issue physical card', 'payout recipients']
+    },
+    radar: {
+        idPattern: /\b(r_)\w+/g,
+        keywords: ['radar', 'risk', 'block', 'review', '3ds', 'authorization boost', 'intervention'],
+        strongPhrases: ['blocked payment', 'risk score', 'early warning', 'radar rules']
+    },
+    other_products: {
+        idPattern: /\b(vs_|fc_|climate_)\w+/g,
+        keywords: ['atlas', 'identity', 'climate', 'financial connections', 'link', 'pci', 'verification'],
+        strongPhrases: ['identity verification', 'carbon removal', 'account data sync', 'incorporation status']
+    }
+};
+
+export const detectContext = (text: string) => {
+    if (!text) return null;
+    const t = text.toLowerCase();
+    
+    let bestMatch = null;
+    let maxScore = 0;
+    let runnerUpScore = 0;
+    
+    const THRESHOLD = 1; 
+
+    Object.entries(CONTEXT_PATTERNS).forEach(([context, patterns]) => {
+        let score = 0;
+        if (patterns.idPattern && patterns.idPattern.test(text)) {
+            score += 15;
+        }
+        patterns.strongPhrases.forEach(phrase => {
+            if (t.includes(phrase)) score += 5;
+        });
+        patterns.keywords.forEach(word => {
+            const regex = new RegExp(`\\b${word}\\b`, 'i');
+            if (regex.test(text)) score += 1;
+        });
+        if (score > maxScore) {
+            runnerUpScore = maxScore;
+            maxScore = score;
+            bestMatch = context;
+        } else if (score > runnerUpScore) {
+            runnerUpScore = score;
+        }
+    });
+
+    if (maxScore < 15 && (maxScore - runnerUpScore) < 2 && maxScore > 2) {
+        return null;
+    }
+
+    return maxScore >= THRESHOLD ? bestMatch : null;
+};
+
+// --- CUSTOMER-FACING SYSTEM PROMPT (Expensive, Detailed, Persona-based) ---
+export const SYSTEM_PROMPT = `You are a world-class AI assistant for customer support professionals. Your goal is to generate responses based on a strict set of rules and formats. 
+
+--- INTEGRATION BEST PRACTICES (STRICT) ---
+- **Payment Intents First:** Always prioritize the Payment Intent API. Never recommend the legacy Charges API.
+- **Modern UI Elements:** Prioritize the Payment Element or Checkout. Never recommend the legacy Card Element.
+- **Migration Advice:** If a user mentions the Charges API or Card Element, politely advise them to migrate to Payment Intents and Payment Element.
+- **Latest Versions:** Always default to the latest version of the Stripe API and SDK.
+- **Avoid Deprecated Tools:** Do not mention the Sources API or Tokens for saving cards. Recommend the Setup Intent API instead.
+
+--- PRIMARY PERSPECTIVE & PRIVACY DIRECTIVES ---
+1. **ALWAYS** write in the **First Person ("I")** as the Agent.
+2. **NEVER** mention real names of Users or Account Holders. Use "User" or "Account Holder".
+
+--- EMOTIONAL INTELLIGENCE GUIDELINES ---
+- Identify the Emotion, Validate Feelings, Use Reflective Listening, and Adopt a Collaborative Tone.
+`;
+
+// --- INTERNAL/UTILITY SYSTEM PROMPT (Cheap, Concise, Fact-based) ---
+export const INTERNAL_SYSTEM_PROMPT = `You are an expert technical support analyst for Stripe. 
+
+--- CORE DIRECTIVES ---
+1. **INTEGRATION STANDARDS:** Prioritize Payment Intents and Payment Element. Never recommend legacy Charges or Card Element APIs.
+2. **PERSPECTIVE:** Write in the **First Person ("I")**.
+3. **PRIVACY:** **NEVER** output the real name of the user.
+4. **FACTUAL:** Use sentence fragments and bullet points. Use "NA" if information is missing.
+
+--- KNOWLEDGE RETRIEVAL ---
+- Prioritize docs.stripe.com.
+`;
+
+// --- OPTIMIZED RULES FOR INTERNAL NOTES ---
+export const INTERNAL_SCALED_RULES = `
+# Internal Format Rules (STRICT)
+- **Technical Accuracy:** Follow Stripe's LLM agent guidelines: Prefer Payment Intents over Charges; Prefer Payment Element over Card Element.
+- **Absolute Brevity:** Outputs must be **short and concise**.
+- **First Person ("I"):** Always use "I" for your actions.
+- **Anonymity:** No real names.
+`;
+
+export const INITIAL_GENERAL_RULES = `
+--- GENERAL RULES ---
+- Use simple English. Apply Emotional Intelligence Guidelines.
+- **Prioritize Payment Intents:** Never recommend the legacy Charges API. Recommend migration if relevant.
+- **Prioritize Payment Element:** Never recommend legacy Card Elements.
+- Never blame anyone. Make all section titles bold.
+- **LINK FORMATTING:** Use support.stripe.com/..., docs.stripe.com/..., or dashboard.stripe.com/....
+- Use "NA" instead of "Not provided".
+- Use "User" for accounts, "End User" for non-accounts.
+
+# Core Persona & Voice
+- **First-Person Perspective ("I"):** You are the agent. Never refer to yourself as "Gee" or "the agent".
+- **Summary Field Rule:** State "User contacted Stripe regarding..."
+- **Universal Positive Language:** Avoid "unfortunately", "failed", "problem", etc. Reframe as what IS possible.
+
+# Knowledge Verification & Search Grounding
+- **Mandatory Research:** Use Google Search to verify documentation.
+- **Invisible Mechanism:** Narrate as "I checked Stripe documentation".
+- **Link Integrity:** Only provide links you've verified exist.
+`;

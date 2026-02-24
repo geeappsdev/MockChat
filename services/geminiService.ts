@@ -1,186 +1,107 @@
 
-import { GoogleGenAI, Type } from '@google/genai';
-import { SYSTEM_PROMPT, FORMAT_DEFINITIONS } from '../constants';
+import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
+import { SYSTEM_PROMPT, INTERNAL_SYSTEM_PROMPT, FORMAT_DEFINITIONS, INTERNAL_SCALED_RULES, CONTEXT_LINKS } from '../constants';
 
-// Configuration for the Proxy
-// In Vite, import.meta.env.DEV is true during development, false in production.
-// We only want to use the local proxy during development. 
-// In production, we connect directly to the Google API.
-const isDevelopment = process.env.NODE_ENV === 'development';
-const PROXY_BASE_URL = isDevelopment ? '/google-api' : undefined;
-
-const getFriendlyErrorMessage = (error) => {
-    const msg = error.message || '';
-    
-    if (msg.includes('NetworkError') || msg.includes('Failed to fetch') || msg.includes('Type error') || error.name === 'TypeError') {
-        return "⚠️ Connection Blocked: The app cannot reach Google's servers. This is usually caused by a VPN, Firewall, or Enterprise Policy blocking 'generativelanguage.googleapis.com'. Ensure the Proxy in vite.config.ts is active.";
+const getFriendlyErrorMessage = (error: any): string => {
+    const msg = (error.message || error.toString()).toLowerCase();
+    if (msg.includes('networkerror') || msg.includes('failed to fetch')) {
+        return "⚠️ Connection Issue: Unable to reach Google's servers. Check your connection.";
     }
-
-    if (msg.includes('API key not valid') || msg.includes('API_KEY_INVALID') || msg.includes('400') || msg.includes('403')) {
-        return "The provided API key is not valid. Please check your key and try again.";
+    if (msg.includes('api key not valid') || msg.includes('api_key_invalid') || msg.includes('401')) {
+        return "🔑 Authentication Failed: API key is invalid or expired.";
     }
-    if (msg.includes('429') || msg.includes('Resource has been exhausted')) {
-        return "You're sending requests too quickly. Please wait a moment and try again.";
+    if (msg.includes('429') || msg.includes('quota')) {
+        return "⏳ Quota Exceeded: Too many requests. Please wait a moment.";
     }
-    if (msg.includes('503') || msg.includes('The service is currently unavailable')) {
-        return "The AI service is temporarily overloaded. Please try again in a few seconds.";
+    if (msg.includes('safety') || msg.includes('blocked')) {
+        return "🛡️ Content Blocked: Flagged by safety filters. Try rephrasing.";
     }
-    if (msg.includes('SAFETY')) {
-        return "The request was blocked due to safety settings. Please rephrase your prompt.";
-    }
-    
-    return "An unexpected error occurred. Please try again.";
+    return `An unexpected error occurred: ${error.message || 'Unknown error'}`;
 };
 
-export const generateResponseStream = async (userQuery, format, channelHistory, coreRules, isNewContext, apiKey, signal) => {
-  if (!apiKey) {
-      throw new Error("API Key is missing. Please enter a valid API key.");
+export const generateResponseStream = async (userQuery: string, format: string, channelHistory: string, coreRules: string, isNewContext: boolean, signal: AbortSignal, attachments = [], detectedContext: string | null = null, sourceTruthContent = '') => {
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+  const formatTemplate = FORMAT_DEFINITIONS[format as keyof typeof FORMAT_DEFINITIONS];
+  const sanitizedHistory = channelHistory ? channelHistory.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim() : '';
+  
+  const historyForPrompt = isNewContext 
+    ? `The user has started a new context. IGNORE all previous conversation history. New context: "${userQuery}"`
+    : `# CONVERSATION HISTORY\n${sanitizedHistory}`;
+
+  let formatEnforcement = formatTemplate ? `You MUST adhere strictly to this template:\n${formatTemplate}` : "Follow standard support format.";
+
+  const isInternal = ['CL', 'INV', 'QS', 'CF'].includes(format);
+  const systemPromptToUse = isInternal ? INTERNAL_SYSTEM_PROMPT : SYSTEM_PROMPT;
+  const rulesToUse = isInternal ? INTERNAL_SCALED_RULES : coreRules;
+
+  let contextDocsPrompt = "";
+  if (detectedContext && CONTEXT_LINKS[detectedContext as keyof typeof CONTEXT_LINKS]) {
+      const verifiedLinks = CONTEXT_LINKS[detectedContext as keyof typeof CONTEXT_LINKS];
+      contextDocsPrompt = `\n# RELEVANT RESOURCES\n${verifiedLinks.map(l => `- ${l.name}: ${l.url}`).join('\n')}`;
   }
 
-  // Initialize AI Client per request with the provided key and Proxy URL
-  const ai = new GoogleGenAI({ 
-      apiKey: apiKey, 
-      baseUrl: PROXY_BASE_URL,
-      apiVersion: 'v1beta' 
-  } as any);
-
-  const formatTemplate = FORMAT_DEFINITIONS[format];
-  
-  // History Sanitization
-  const sanitizedHistory = channelHistory ? channelHistory.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim() : '';
-
-  const historyForPrompt = isNewContext 
-    ? `The user has started a new context. IGNORE all previous conversation history. The new context is:\n\n"${userQuery}"`
-    : `# CONVERSATION HISTORY (from this channel)\nThis is the recent conversation history for this channel. Use it for context.\n${sanitizedHistory}`;
+  const sourceTruthPrompt = sourceTruthContent.trim() ? `
+    # SOURCE OF TRUTH (PRIORITY)
+    ${sourceTruthContent}
+  ` : '';
 
   const fullPrompt = `
-    ${SYSTEM_PROMPT}
-
+    ${systemPromptToUse}
+    ${sourceTruthPrompt} 
     # CORE RULES
-    You MUST follow these rules for all responses.
-    ${coreRules}
-    
-    # INSTRUCTIONS FOR KNOWLEDGE RETRIEVAL
-    - You have access to Google Search. 
-    - When the user asks about technical details, error codes, or Stripe products, you MUST use the Google Search tool to verify your answer against "site:docs.stripe.com" or "site:support.stripe.com".
-    - Do not guess. If you are unsure, search.
+    ${rulesToUse}
+    ${contextDocsPrompt}
     ---
-
     ${historyForPrompt}
     ---
-
-    # NEW USER INPUT / REFINEMENT REQUEST
-    The user has just sent the following message in the "${format}" channel:
-    "${userQuery}"
-
-    # CONTINUOUS CONTEXT & LOGIC PROTOCOL
-    If this is a follow-up to an existing draft (see History above), treat the new user input as a **MODIFICATION** request.
-    1. **Identify New Facts**: Extract the new context or correction provided by the user.
-    2. **Logical Integration**: Merge this new context into the existing analysis/draft.
-       - **CRITICAL LOGIC CHECK**: Compare the new context with the previous draft. If the new context contradicts previous assumptions (e.g., User originally said "refund", now says "chargeback"), you must **PRIORITIZE THE NEW INPUT** and completely rewrite the logic to ensure consistency. Eliminate any contradictions.
-    3. **Re-Output**: RE-GENERATE the full "${format}" content with the changes applied. 
-       - Do NOT output conversational filler like "Okay, I've updated the draft." Just output the document.
-
-    # QUALITY ASSURANCE & GENERATION PROCESS (EXCEPTION-BASED REPORTING)
-    You are your own QA Manager. Before outputting the final document, you must perform a "Chain of Verification" process visible in a <thinking> block.
-    
-    **Step 1: Research & Draft (Mental)**
-    - Identify knowledge gaps. Search \`site:docs.stripe.com\` for facts.
-    - Draft the content internally.
-
-    **Step 2: Self-Evaluation & Revision (Visible)**
-    - Self-evaluate against the **"Core Rules"** and **"Knowledge Verification"** guidelines.
-    - **TOKEN SAVING MODE**:
-      - If your draft passes all rules, output ONLY: "<thinking>QA Verified. No revisions needed.</thinking>"
-      - **ONLY** if you find an error (e.g., negative word found, link broken), output the specific correction: "<thinking>Correction: Reframed 'failed' to 'declined'. Correction: Fixed broken link.</thinking>"
-      - Do NOT list successful checks. Only list failures that were fixed.
-
-    # OUTPUT INSTRUCTIONS
-    1. **Start with the <thinking> block**: 
-       <thinking>
-       QA Verified. No revisions needed.
-       </thinking>
-       OR
-       <thinking>
-       Correction: Removed negative word "unfortunately".
-       Correction: Added missing dashboard link.
-       </thinking>
-    
-    2. **Follow with the Final Output**:
-       - Start immediately with the template (e.g., "**Case ID:**").
-       - **ALL FIELDS MANDATORY**: Do not skip any field. Write "N/A" if empty.
-       - **MANDATORY QA CHECKLIST**: At the bottom, you MUST check off the items in the "**🤖 QA Reflection:**" checklist (mark with [x]).
-
-    ## FORMAT: ${format}
-    ### TEMPLATE:
-    ${formatTemplate}
+    ${formatEnforcement}
+    # NEW USER INPUT
+    ${userQuery}
   `;
 
+  const parts: any[] = [{ text: fullPrompt }];
+  if (attachments && attachments.length > 0) {
+      attachments.forEach((att: any) => {
+          if (att.data?.startsWith('data:')) {
+            const matches = att.data.match(/^data:(.+);base64,(.+)$/);
+            if (matches?.length === 3) {
+                parts.push({ inlineData: { mimeType: matches[1], data: matches[2] } });
+            }
+          }
+      });
+  }
+
   try {
-    const response = await ai.models.generateContentStream({
-        model: 'gemini-2.5-flash',
-        contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+      // NOTE: Removed maxOutputTokens to prevent "No Output" issue with Gemini 3 Thinking logic
+      const response = await ai.models.generateContentStream({
+        model: 'gemini-3-flash-preview',
+        contents: [{ role: 'user', parts: parts }],
         config: {
-             tools: [{ googleSearch: {} }],
-             // Explicitly pass signal to handle AbortController
-             // @ts-ignore
-             signal: signal 
-        }
-    });
-    return response;
+          temperature: 0.3,
+          tools: [{ googleSearch: {} }]
+        },
+      });
+
+      return response;
+      
   } catch (error) {
-    console.error("Error generating response from Gemini API:", error);
-    const friendlyMsg = getFriendlyErrorMessage(error);
-    throw new Error(friendlyMsg);
+      throw new Error(getFriendlyErrorMessage(error));
   }
 };
 
-export const generateUpdatedRules = async (userInstruction, currentRules, apiKey) => {
-    if (!apiKey) {
-        return { error: "API Key is missing. Cannot update rules." };
-    }
-
-    const ai = new GoogleGenAI({ 
-        apiKey: apiKey, 
-        baseUrl: PROXY_BASE_URL,
-        apiVersion: 'v1beta' 
-    } as any);
-
-    const prompt = `
-    You are an expert System Architect and Prompt Engineer. 
-    Your task is to update the "Core Rules" configuration for an AI support agent based on the user's request.
-
-    ## Current Core Rules:
-    ${currentRules}
-
-    ## User's Requested Change/Feedback:
-    "${userInstruction}"
-
-    ## Instructions:
-    1. Analyze the user's request.
-    2. Modify the Current Core Rules to incorporate the request.
-    3. Ensure the new rules do not contradict the fundamental "Persona & Voice" unless explicitly asked.
-    4. Return ONLY the updated full text of the Core Rules. Do not include markdown fencing like \`\`\` or conversational text. Just the raw rule text.
-    `;
+export const generateUpdatedRules = async (userInstruction: string, currentRules: string) => {
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const prompt = `Rewrite these rules based on: "${userInstruction}"\n\nCURRENT RULES:\n${currentRules}`;
 
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [{ role: 'user', parts: [{ text: prompt }] }]
+            model: 'gemini-3-flash-preview',
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: { temperature: 0.1 }
         });
-
-        const updatedRules = response.text.trim();
-        
-        return { 
-            error: null,
-            updatedRules: updatedRules, 
-            confirmationMessage: "Rules updated successfully based on your instructions." 
-        };
+        return { updatedRules: response.text?.trim() || currentRules, confirmationMessage: "Rules updated." };
     } catch (error) {
-        console.error("Error updating rules:", error);
-        return { 
-            error: getFriendlyErrorMessage(error),
-            updatedRules: currentRules 
-        };
+        return { error: getFriendlyErrorMessage(error) };
     }
 };

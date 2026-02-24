@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 
 function useLocalStorage<T>(key: string, initialValue: T) {
@@ -11,6 +10,10 @@ function useLocalStorage<T>(key: string, initialValue: T) {
     try {
       // Get from local storage by key
       const item = window.localStorage.getItem(key);
+      // FIX: Handle "undefined" string which crashes JSON.parse
+      if (item === "undefined") {
+          return initialValue;
+      }
       // Parse stored json or if none return initialValue
       return item ? JSON.parse(item) : initialValue;
     } catch (error) {
@@ -31,6 +34,8 @@ function useLocalStorage<T>(key: string, initialValue: T) {
       setStoredValue(valueToStore);
       // Save to local storage
       if (typeof window !== 'undefined') {
+        // FIX: Ensure we don't store undefined, store null instead if needed, 
+        // though handling it in read is safer.
         window.localStorage.setItem(key, JSON.stringify(valueToStore));
       }
     } catch (error) {
