@@ -8,7 +8,7 @@ import SourceTruthModal from './components/SourceTruthModal';
 import SustainabilityModal from './components/SustainabilityModal';
 import ApiKeyLogin from './components/ApiKeyLogin';
 import useLocalStorage from './hooks/useLocalStorage';
-import { generateResponseStream, incrementDailyUsage, getDailyUsage, getApiKey, setApiKey as saveApiKey, clearApiKey } from './services/geminiService';
+import { generateResponseStream, incrementDailyUsage, getDailyUsage, getApiKey, setApiKey as saveApiKey, clearApiKey, getEnvApiKey } from './services/geminiService';
 import { INITIAL_GENERAL_RULES, CHANNEL_QUICK_LINKS, CONTEXT_LINKS, detectContext, DAILY_USAGE_LIMIT } from './constants';
 import CommandPalette from './components/CommandPalette';
 
@@ -259,7 +259,7 @@ const App = () => {
     return (
       <ApiKeyLogin 
         onLogin={handleApiKeyLogin} 
-        systemKeyAvailable={!!process.env.GEMINI_API_KEY}
+        systemKeyAvailable={!!getEnvApiKey()}
         onUseSystemKey={handleUseSystemKey}
       />
     );

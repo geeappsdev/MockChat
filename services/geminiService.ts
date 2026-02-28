@@ -26,6 +26,15 @@ export const getApiKey = () => localStorage.getItem(API_KEY_STORAGE);
 export const setApiKey = (key: string) => localStorage.setItem(API_KEY_STORAGE, key);
 export const clearApiKey = () => localStorage.removeItem(API_KEY_STORAGE);
 
+export const getEnvApiKey = () => {
+    try {
+        // @ts-ignore
+        return import.meta.env.VITE_GEMINI_API_KEY || (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : undefined);
+    } catch (e) {
+        return undefined;
+    }
+};
+
 export const getDailyUsage = () => {
     const today = new Date().toISOString().split('T')[0];
     const stored = localStorage.getItem(USAGE_KEY);
@@ -51,7 +60,7 @@ export const generateResponseStream = async (userQuery: string, format: string, 
   }
 
   const userApiKey = getApiKey();
-  const apiKey = (userApiKey && userApiKey !== 'system') ? userApiKey : process.env.GEMINI_API_KEY;
+  const apiKey = (userApiKey && userApiKey !== 'system') ? userApiKey : getEnvApiKey();
 
   if (!apiKey) {
       throw new Error("🔑 Missing API Key: Please provide a Gemini API key in Settings.");
@@ -125,7 +134,7 @@ export const generateResponseStream = async (userQuery: string, format: string, 
 
 export const generateUpdatedRules = async (userInstruction: string, currentRules: string) => {
     const userApiKey = getApiKey();
-    const apiKey = (userApiKey && userApiKey !== 'system') ? userApiKey : process.env.GEMINI_API_KEY;
+    const apiKey = (userApiKey && userApiKey !== 'system') ? userApiKey : getEnvApiKey();
     
     if (!apiKey) return { error: "🔑 Missing API Key" };
 
