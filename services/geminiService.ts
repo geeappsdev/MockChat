@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
-import { SYSTEM_PROMPT, INTERNAL_SYSTEM_PROMPT, FORMAT_DEFINITIONS, INTERNAL_SCALED_RULES, CONTEXT_LINKS } from '../constants';
+import { SYSTEM_PROMPT, INTERNAL_SYSTEM_PROMPT, FORMAT_DEFINITIONS, INTERNAL_SCALED_RULES, CONTEXT_LINKS, DAILY_USAGE_LIMIT } from '../constants';
 
 const getFriendlyErrorMessage = (error: any): string => {
     const msg = (error.message || error.toString()).toLowerCase();
@@ -19,17 +19,57 @@ const getFriendlyErrorMessage = (error: any): string => {
     return `An unexpected error occurred: ${error.message || 'Unknown error'}`;
 };
 
+const USAGE_KEY = 'gee_daily_usage';
+const API_KEY_STORAGE = 'gee_api_key';
+
+export const getApiKey = () => localStorage.getItem(API_KEY_STORAGE);
+export const setApiKey = (key: string) => localStorage.setItem(API_KEY_STORAGE, key);
+export const clearApiKey = () => localStorage.removeItem(API_KEY_STORAGE);
+
+export const getDailyUsage = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const stored = localStorage.getItem(USAGE_KEY);
+    if (!stored) return { date: today, count: 0 };
+    
+    const data = JSON.parse(stored);
+    if (data.date !== today) return { date: today, count: 0 };
+    return data;
+};
+
+export const incrementDailyUsage = () => {
+    const usage = getDailyUsage();
+    usage.count += 1;
+    localStorage.setItem(USAGE_KEY, JSON.stringify(usage));
+    return usage.count;
+};
+
 export const generateResponseStream = async (userQuery: string, format: string, channelHistory: string, coreRules: string, isNewContext: boolean, signal: AbortSignal, attachments = [], detectedContext: string | null = null, sourceTruthContent = '') => {
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const currentUsage = getDailyUsage();
+  
+  if (currentUsage.count >= DAILY_USAGE_LIMIT) {
+      throw new Error(`🛑 Daily Limit Reached: You have reached the fixed daily limit of ${DAILY_USAGE_LIMIT} requests to prevent charges.`);
+  }
+
+  const userApiKey = getApiKey();
+  const apiKey = (userApiKey && userApiKey !== 'system') ? userApiKey : process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+      throw new Error("🔑 Missing API Key: Please provide a Gemini API key in Settings.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
 
   const formatTemplate = FORMAT_DEFINITIONS[format as keyof typeof FORMAT_DEFINITIONS];
-  const sanitizedHistory = channelHistory ? channelHistory.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim() : '';
+  
+  // Token Optimization: Truncate history to last 4000 chars (~1000 tokens)
+  let sanitizedHistory = channelHistory ? channelHistory.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim() : '';
+  if (sanitizedHistory.length > 4000) {
+      sanitizedHistory = "..." + sanitizedHistory.slice(-4000);
+  }
   
   const historyForPrompt = isNewContext 
-    ? `The user has started a new context. IGNORE all previous conversation history. New context: "${userQuery}"`
-    : `# CONVERSATION HISTORY\n${sanitizedHistory}`;
-
-  let formatEnforcement = formatTemplate ? `You MUST adhere strictly to this template:\n${formatTemplate}` : "Follow standard support format.";
+    ? `[NEW CONTEXT] Ignore previous history.`
+    : `# HISTORY\n${sanitizedHistory}`;
 
   const isInternal = ['CL', 'INV', 'QS', 'CF'].includes(format);
   const systemPromptToUse = isInternal ? INTERNAL_SYSTEM_PROMPT : SYSTEM_PROMPT;
@@ -38,29 +78,22 @@ export const generateResponseStream = async (userQuery: string, format: string, 
   let contextDocsPrompt = "";
   if (detectedContext && CONTEXT_LINKS[detectedContext as keyof typeof CONTEXT_LINKS]) {
       const verifiedLinks = CONTEXT_LINKS[detectedContext as keyof typeof CONTEXT_LINKS];
-      contextDocsPrompt = `\n# RELEVANT RESOURCES\n${verifiedLinks.map(l => `- ${l.name}: ${l.url}`).join('\n')}`;
+      contextDocsPrompt = `\n# RESOURCES\n${verifiedLinks.map(l => `- ${l.name}: ${l.url}`).join('\n')}`;
   }
 
-  const sourceTruthPrompt = sourceTruthContent.trim() ? `
-    # SOURCE OF TRUTH (PRIORITY)
-    ${sourceTruthContent}
-  ` : '';
+  const sourceTruthPrompt = sourceTruthContent.trim() ? `\n# SOURCE OF TRUTH\n${sourceTruthContent}` : '';
 
-  const fullPrompt = `
-    ${systemPromptToUse}
-    ${sourceTruthPrompt} 
-    # CORE RULES
-    ${rulesToUse}
+  const userPrompt = `
+    ${historyForPrompt}
+    ${sourceTruthPrompt}
     ${contextDocsPrompt}
     ---
-    ${historyForPrompt}
+    FORMAT: ${formatTemplate ? formatTemplate : "Standard support format."}
     ---
-    ${formatEnforcement}
-    # NEW USER INPUT
-    ${userQuery}
+    INPUT: ${userQuery}
   `;
 
-  const parts: any[] = [{ text: fullPrompt }];
+  const parts: any[] = [{ text: userPrompt }];
   if (attachments && attachments.length > 0) {
       attachments.forEach((att: any) => {
           if (att.data?.startsWith('data:')) {
@@ -73,11 +106,11 @@ export const generateResponseStream = async (userQuery: string, format: string, 
   }
 
   try {
-      // NOTE: Removed maxOutputTokens to prevent "No Output" issue with Gemini 3 Thinking logic
       const response = await ai.models.generateContentStream({
         model: 'gemini-3-flash-preview',
         contents: [{ role: 'user', parts: parts }],
         config: {
+          systemInstruction: `${systemPromptToUse}\n${rulesToUse}`,
           temperature: 0.3,
           tools: [{ googleSearch: {} }]
         },
@@ -91,7 +124,12 @@ export const generateResponseStream = async (userQuery: string, format: string, 
 };
 
 export const generateUpdatedRules = async (userInstruction: string, currentRules: string) => {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const userApiKey = getApiKey();
+    const apiKey = (userApiKey && userApiKey !== 'system') ? userApiKey : process.env.GEMINI_API_KEY;
+    
+    if (!apiKey) return { error: "🔑 Missing API Key" };
+
+    const ai = new GoogleGenAI({ apiKey });
     const prompt = `Rewrite these rules based on: "${userInstruction}"\n\nCURRENT RULES:\n${currentRules}`;
 
     try {

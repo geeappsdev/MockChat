@@ -40,12 +40,13 @@ const MODES = [
   { id: 'system', name: 'System', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg> }
 ];
 
-const ProfileSettingsModal = ({ isOpen, onClose, userProfile, onSave, onDisconnect, isAdmin, brandLogo, onSaveBrandLogo }) => {
+const ProfileSettingsModal = ({ isOpen, onClose, userProfile, onSave, onDisconnect, isAdmin, brandLogo, onSaveBrandLogo, usageLimit, dailyUsage }) => {
   const [name, setName] = useState(userProfile?.name || '');
   const [avatar, setAvatar] = useState(userProfile?.avatar || '');
   const [theme, setTheme] = useState(userProfile?.theme || 'default');
   const [mode, setMode] = useState(userProfile?.mode || 'system');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [currentKey, setCurrentKey] = useState(() => localStorage.getItem('gee_api_key'));
   const fileInputRef = useRef(null);
   const logoInputRef = useRef(null);
 
@@ -244,6 +245,55 @@ const ProfileSettingsModal = ({ isOpen, onClose, userProfile, onSave, onDisconne
                   ))}
               </div>
             </div>
+          </div>
+
+          {/* Usage Safety Section */}
+          <div className="space-y-3 pt-4 border-t border-zinc-100 dark:border-white/5">
+              <div className="flex justify-between items-center">
+                  <label className="block text-xs font-bold text-emerald-500 uppercase tracking-wider">Usage Safety</label>
+                  <span className="text-[9px] bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded border border-emerald-200 font-bold">ACTIVE</span>
+              </div>
+
+              {currentKey && (
+                <div className="p-3 bg-zinc-50 dark:bg-white/5 rounded-xl border border-zinc-100 dark:border-white/5 flex justify-between items-center">
+                  <div>
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Active API Key</p>
+                    <p className="text-xs font-mono text-zinc-600 dark:text-zinc-300">
+                      {currentKey === 'system' ? 'System Default' : `AIzaSy...${currentKey?.slice(-4)}`}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={onDisconnect}
+                    className="text-[10px] font-bold text-red-500 hover:underline"
+                  >
+                    Change Key
+                  </button>
+                </div>
+              )}
+
+              <div className="p-4 bg-emerald-50 dark:bg-emerald-500/10 rounded-xl border border-emerald-100 dark:border-emerald-500/20 space-y-3">
+                  <div className="flex justify-between items-center">
+                      <span className="text-xs text-zinc-600 dark:text-zinc-300">Daily Request Limit</span>
+                      <span className="text-xs font-bold text-zinc-900 dark:text-white bg-white dark:bg-black px-2 py-1 rounded border border-zinc-200 dark:border-white/10">
+                          {usageLimit}
+                      </span>
+                  </div>
+                  <div className="space-y-1">
+                      <div className="flex justify-between text-[10px] font-bold text-zinc-500">
+                          <span>Today's Usage</span>
+                          <span>{dailyUsage?.count || 0} / {usageLimit}</span>
+                      </div>
+                      <div className="h-1.5 w-full bg-zinc-200 dark:bg-white/5 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full transition-all duration-500 ${ (dailyUsage?.count || 0) / usageLimit > 0.9 ? 'bg-red-500' : 'bg-emerald-500' }`}
+                            style={{ width: `${Math.min(100, ((dailyUsage?.count || 0) / usageLimit) * 100)}%` }}
+                          ></div>
+                      </div>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 leading-relaxed italic">
+                      Fixed daily limit to ensure sustainability. Reset daily at midnight.
+                  </p>
+              </div>
           </div>
           
           {/* Workspace Branding (Admin Only) */}

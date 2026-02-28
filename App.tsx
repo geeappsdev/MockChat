@@ -6,9 +6,10 @@ import CoreRulesModal from './components/CoreRulesModal';
 import ProfileSettingsModal from './components/ProfileSettingsModal';
 import SourceTruthModal from './components/SourceTruthModal';
 import SustainabilityModal from './components/SustainabilityModal';
+import ApiKeyLogin from './components/ApiKeyLogin';
 import useLocalStorage from './hooks/useLocalStorage';
-import { generateResponseStream } from './services/geminiService';
-import { INITIAL_GENERAL_RULES, CHANNEL_QUICK_LINKS, CONTEXT_LINKS, detectContext } from './constants';
+import { generateResponseStream, incrementDailyUsage, getDailyUsage, getApiKey, setApiKey as saveApiKey, clearApiKey } from './services/geminiService';
+import { INITIAL_GENERAL_RULES, CHANNEL_QUICK_LINKS, CONTEXT_LINKS, detectContext, DAILY_USAGE_LIMIT } from './constants';
 import CommandPalette from './components/CommandPalette';
 
 const App = () => {
@@ -18,6 +19,9 @@ const App = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [coreRules, setCoreRules] = useState<string>(() => localStorage.getItem('core_rules') || INITIAL_GENERAL_RULES);
   const [connectionStatus, setConnectionStatus] = useState('connected');
+  
+  const [dailyUsage, setDailyUsage] = useState(() => getDailyUsage());
+  const [apiKey, setApiKey] = useState(() => getApiKey());
   
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [manualContext, setManualContext] = useState<string | null>(null);
@@ -156,6 +160,9 @@ const App = () => {
             sourceTruthContent
         );
         
+        incrementDailyUsage();
+        setDailyUsage(getDailyUsage());
+        
         setConnectionStatus('connected');
 
         let aiResponseText = '';
@@ -232,6 +239,32 @@ const App = () => {
 
   const canRegenerate = (messages[activeChannel] || []).length > 0;
 
+  const handleApiKeyLogin = (key: string) => {
+    saveApiKey(key);
+    setApiKey(key);
+  };
+
+  const handleUseSystemKey = () => {
+    saveApiKey('system');
+    setApiKey('system');
+  };
+
+  const handleDisconnectApiKey = () => {
+    clearApiKey();
+    setApiKey(null);
+    setIsProfileModalOpen(false);
+  };
+
+  if (!apiKey) {
+    return (
+      <ApiKeyLogin 
+        onLogin={handleApiKeyLogin} 
+        systemKeyAvailable={!!process.env.GEMINI_API_KEY}
+        onUseSystemKey={handleUseSystemKey}
+      />
+    );
+  }
+
   return (
     <div className={`flex h-screen text-zinc-900 dark:text-zinc-200 font-sans overflow-hidden relative ${userProfile?.theme || ''}`}>
       <CommandPalette 
@@ -285,7 +318,7 @@ const App = () => {
             onDraftChange={handleDraftChange}
             detectedContext={detectedContext}
             onManualContextChange={setManualContext}
-            isLimitReached={false}
+            isLimitReached={dailyUsage.count >= DAILY_USAGE_LIMIT}
             onToggleSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
             onOpenSustainability={() => setIsSustainabilityOpen(true)}
             brandLogo={brandLogo}
@@ -299,10 +332,12 @@ const App = () => {
         onClose={() => setIsProfileModalOpen(false)}
         userProfile={userProfile}
         onSave={setUserProfile}
-        onDisconnect={() => {}} 
+        onDisconnect={handleDisconnectApiKey} 
         isAdmin={isAdmin}
         brandLogo={brandLogo}
         onSaveBrandLogo={setBrandLogo}
+        usageLimit={DAILY_USAGE_LIMIT}
+        dailyUsage={dailyUsage}
       />
 
       <CoreRulesModal 
