@@ -1,5 +1,5 @@
 {
-  "name": "Gee Support",
-  "description": "An AI-powered chatbot designed to assist support agents by generating structured responses in various formats, mimicking a Slack-like interface.",
+  "name": "Elite Email Drafter",
+  "description": "A high-performance email drafting tool that uses Gemini 2.5 Pro and real-time search to apply industry best practices for complete and accurate communication.",
   "requestFramePermissions": []
 }

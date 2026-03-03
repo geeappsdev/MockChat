@@ -1,364 +1,325 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import Sidebar from './components/Sidebar';
-import ChatPanel from './components/ChatPanel';
-import CoreRulesModal from './components/CoreRulesModal';
-import ProfileSettingsModal from './components/ProfileSettingsModal';
-import SourceTruthModal from './components/SourceTruthModal';
-import SustainabilityModal from './components/SustainabilityModal';
-import ApiKeyLogin from './components/ApiKeyLogin';
-import useLocalStorage from './hooks/useLocalStorage';
-import { generateResponseStream, incrementDailyUsage, getDailyUsage, getApiKey, setApiKey as saveApiKey, clearApiKey, getEnvApiKey } from './services/geminiService';
-import { INITIAL_GENERAL_RULES, CHANNEL_QUICK_LINKS, CONTEXT_LINKS, detectContext, DAILY_USAGE_LIMIT } from './constants';
-import CommandPalette from './components/CommandPalette';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  Mail, 
+  Send, 
+  Search, 
+  Sparkles, 
+  CheckCircle2, 
+  AlertCircle, 
+  RefreshCw, 
+  Copy, 
+  Check,
+  ChevronRight,
+  Info,
+  User,
+  MessageSquare,
+  Zap
+} from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import { fetchBestPractices, generateEmailDraft } from './services/geminiService';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+const TONES = [
+  { id: 'professional', label: 'Professional', icon: Zap },
+  { id: 'friendly', label: 'Friendly', icon: MessageSquare },
+  { id: 'urgent', label: 'Urgent', icon: AlertCircle },
+  { id: 'empathetic', label: 'Empathetic', icon: Sparkles },
+  { id: 'concise', label: 'Concise', icon: ChevronRight },
+];
 
 const App = () => {
-  const [activeChannel, setActiveChannel] = useState('EO');
-  const [messages, setMessages] = useState<Record<string, any[]>>({});
-  const [drafts, setDrafts] = useLocalStorage<Record<string, string>>('gee_drafts', {});
-  const [isLoading, setIsLoading] = useState(false);
-  const [coreRules, setCoreRules] = useState<string>(() => localStorage.getItem('core_rules') || INITIAL_GENERAL_RULES);
-  const [connectionStatus, setConnectionStatus] = useState('connected');
-  
-  const [dailyUsage, setDailyUsage] = useState(() => getDailyUsage());
-  const [apiKey, setApiKey] = useState(() => getApiKey());
-  
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [manualContext, setManualContext] = useState<string | null>(null);
-  
-  const [isCoreRulesOpen, setIsCoreRulesOpen] = useState(false);
-  const [isSourceTruthOpen, setIsSourceTruthOpen] = useState(false);
-  const [isSustainabilityOpen, setIsSustainabilityOpen] = useState(false);
-
-  const [sourceTruthContent, setSourceTruthContent] = useLocalStorage('gee_source_truth', '');
-
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [userProfile, setUserProfile] = useLocalStorage('gee_user_profile', {
-    name: 'Support Agent',
-    avatar: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?ixlib=rb-1.2.1&auto=format&fit=crop&w=256&h=256&q=80',
-    theme: 'default',
-    mode: 'system'
-  });
-
-  const [brandLogo, setBrandLogo] = useLocalStorage<string | undefined>('gee_brand_logo', undefined);
-
-  const isAdmin = true;
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [recipient, setRecipient] = useState('');
+  const [context, setContext] = useState('');
+  const [tone, setTone] = useState('professional');
+  const [additionalInstructions, setAdditionalInstructions] = useState('');
+  const [bestPractices, setBestPractices] = useState<string>('');
+  const [isFetchingPractices, setIsFetchingPractices] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem('core_rules', coreRules);
-  }, [coreRules]);
-
-  useEffect(() => {
-    const root = window.document.documentElement;
-    const mode = userProfile.mode || 'system';
-
-    const applyTheme = () => {
-        if (mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            root.classList.add('dark');
-        } else {
-            root.classList.remove('dark');
-        }
-    };
-
-    applyTheme();
-
-    if (mode === 'system') {
-        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-        mediaQuery.addEventListener('change', applyTheme);
-        return () => mediaQuery.removeEventListener('change', applyTheme);
-    }
-  }, [userProfile.mode]);
-
-  const getCurrentMessages = () => messages[activeChannel] || [];
-
-  const addMessage = (channel: string, message: any) => {
-    setMessages(prev => ({
-      ...prev,
-      [channel]: [...(prev[channel] || []), message]
-    }));
-  };
-
-  const channelMessages = messages[activeChannel] || [];
-  const lastUserMsg = [...channelMessages].reverse().find(m => m.sender === 'user');
-  const lastUserText = lastUserMsg ? lastUserMsg.text : '';
-  const currentDraft = drafts[activeChannel] || '';
-
-  const detectedContext = useMemo(() => {
-      if (manualContext) return manualContext;
-      const textToAnalyze = currentDraft.length > 5 ? currentDraft : lastUserText;
-      if (!textToAnalyze) return null;
-      return detectContext(textToAnalyze);
-  }, [manualContext, lastUserText, currentDraft, activeChannel]);
-
-  useEffect(() => {
-      setManualContext(null);
-  }, [activeChannel]);
-
-  // Auto-popup sustainability report once daily
-  useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const lastPopupDate = localStorage.getItem('last_sustainability_popup');
-    
-    if (lastPopupDate !== today) {
-      const timer = setTimeout(() => {
-        setIsSustainabilityOpen(true);
-        localStorage.setItem('last_sustainability_popup', today);
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
+    handleFetchBestPractices();
   }, []);
 
-  const getContextLinks = () => {
-      if (detectedContext && CONTEXT_LINKS[detectedContext as keyof typeof CONTEXT_LINKS]) {
-          return CONTEXT_LINKS[detectedContext as keyof typeof CONTEXT_LINKS];
-      }
-      return [];
-  };
-
-  const getChannelLinks = () => {
-      return CHANNEL_QUICK_LINKS[activeChannel as keyof typeof CHANNEL_QUICK_LINKS] || [];
-  };
-
-  const handleSendMessage = async (text: string, attachments = [], formatOverride = null) => {
-    setDrafts(prev => ({ ...prev, [activeChannel]: '' }));
-
-    const currentChan = activeChannel; // Capture channel in closure
-    const userMsg = { 
-        id: Date.now(), 
-        sender: 'user', 
-        name: userProfile.name, 
-        avatar: userProfile.avatar, 
-        text: text,
-        attachments: attachments
-    };
-    
-    addMessage(currentChan, userMsg);
-    setIsLoading(true);
-    setConnectionStatus('connecting');
-
-    if (abortControllerRef.current) abortControllerRef.current.abort();
-    abortControllerRef.current = new AbortController();
-    const signal = abortControllerRef.current.signal;
-
+  const handleFetchBestPractices = async () => {
+    setIsFetchingPractices(true);
+    setError(null);
     try {
-        const historyData = (messages[currentChan] || [])
-            .map(m => `${m.sender === 'user' ? 'User' : 'AI'}: ${m.text}`)
-            .join('\n');
-        
-        const formatToUse = formatOverride || currentChan;
-
-        const stream = await generateResponseStream(
-            text, 
-            formatToUse, 
-            historyData, 
-            coreRules, 
-            (messages[currentChan] || []).length === 0,
-            signal,
-            attachments,
-            detectedContext,
-            sourceTruthContent
-        );
-        
-        incrementDailyUsage();
-        setDailyUsage(getDailyUsage());
-        
-        setConnectionStatus('connected');
-
-        let aiResponseText = '';
-        const aiMsgId = Date.now() + 1;
-        
-        // Initial placeholder for AI message
-        addMessage(currentChan, { 
-            id: aiMsgId, 
-            sender: 'ai', 
-            name: 'Gee', 
-            avatar: 'https://ui-avatars.com/api/?name=Gee+AI&background=18181b&color=fff&rounded=true&bold=true&size=128', 
-            text: '' 
-        });
-
-        // Loop through native stream chunks
-        for await (const chunk of stream) {
-            if (signal.aborted) break;
-            const chunkText = chunk.text;
-            if (chunkText) {
-                aiResponseText += chunkText;
-                setMessages(prev => {
-                    const channelMsgs = prev[currentChan] || [];
-                    const updatedMsgs = channelMsgs.map(msg => 
-                        msg.id === aiMsgId ? { ...msg, text: aiResponseText } : msg
-                    );
-                    return { ...prev, [currentChan]: updatedMsgs };
-                });
-            }
-        }
-
-    } catch (error: any) {
-        if (error.name === 'AbortError' || error.message?.includes('aborted')) {
-            console.log('Generation stopped');
-        } else {
-            console.error("Stream Error", error);
-            setConnectionStatus('error');
-            addMessage(currentChan, { 
-                id: Date.now() + 1, 
-                sender: 'ai', 
-                name: 'System Error', 
-                avatar: 'https://ui-avatars.com/api/?name=Error&background=ef4444&color=fff&rounded=true&bold=true&size=128', 
-                text: `**Error:** ${error.message || 'Unknown failure'}` 
-            });
-        }
+      const practices = await fetchBestPractices();
+      setBestPractices(practices || '');
+    } catch (err: any) {
+      setError("Failed to fetch best practices. Using defaults.");
+      setBestPractices("1. Be clear and concise.\n2. Use a professional tone.\n3. Ensure all user questions are answered.\n4. Proofread for accuracy.");
     } finally {
-        setIsLoading(false);
-        abortControllerRef.current = null;
+      setIsFetchingPractices(false);
     }
   };
 
-  const handleStopGeneration = () => {
-      if (abortControllerRef.current) abortControllerRef.current.abort();
-      setIsLoading(false);
+  const handleGenerate = async () => {
+    if (!context.trim()) {
+      setError("Please provide some context for the email.");
+      return;
+    }
+
+    setIsGenerating(true);
+    setError(null);
+    try {
+      const result = await generateEmailDraft({
+        recipient,
+        context,
+        tone,
+        bestPractices,
+        additionalInstructions
+      });
+      setDraft(result || '');
+    } catch (err: any) {
+      setError(err.message || "Failed to generate email draft.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  const handleClearChat = () => {
-      setMessages(prev => ({ ...prev, [activeChannel]: [] }));
-      setManualContext(null);
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(draft);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
-  
-  const handleRegenerate = () => {
-      const currentMsgs = messages[activeChannel] || [];
-      const lastUserMsg = [...currentMsgs].reverse().find(m => m.sender === 'user');
-      if (lastUserMsg) handleSendMessage(lastUserMsg.text, lastUserMsg.attachments || []);
-  };
-  
-  const handleDraftChange = (text: string) => {
-      setDrafts(prev => ({ ...prev, [activeChannel]: text }));
-  };
-
-  const handleQuickSummary = () => {
-      handleSendMessage("Generate a Quick Summary of the current conversation.", [], 'QS');
-  };
-
-  const canRegenerate = (messages[activeChannel] || []).length > 0;
-
-  const handleApiKeyLogin = (key: string) => {
-    saveApiKey(key);
-    setApiKey(key);
-  };
-
-  const handleUseSystemKey = () => {
-    saveApiKey('system');
-    setApiKey('system');
-  };
-
-  const handleDisconnectApiKey = () => {
-    clearApiKey();
-    setApiKey(null);
-    setIsProfileModalOpen(false);
-  };
-
-  if (!apiKey) {
-    return (
-      <ApiKeyLogin 
-        onLogin={handleApiKeyLogin} 
-        systemKeyAvailable={!!getEnvApiKey()}
-        onUseSystemKey={handleUseSystemKey}
-      />
-    );
-  }
 
   return (
-    <div className={`flex h-screen text-zinc-900 dark:text-zinc-200 font-sans overflow-hidden relative ${userProfile?.theme || ''}`}>
-      <CommandPalette 
-        isOpen={false} 
-        onClose={() => {}} 
-        onCommand={(cmd: string) => {
-             if (cmd === 'clear') handleClearChat();
-             if (cmd.startsWith('channel:')) setActiveChannel(cmd.split(':')[1]);
-             if (cmd === 'settings') setIsProfileModalOpen(true);
-             if (cmd === 'rules') setIsCoreRulesOpen(true);
-        }}
-        activeChannel={activeChannel}
-      />
+    <div className="min-h-screen bg-zinc-50 flex flex-col font-sans">
+      {/* Header */}
+      <header className="h-16 border-b border-zinc-200 bg-white flex items-center px-6 justify-between sticky top-0 z-10">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-zinc-900 rounded-lg flex items-center justify-center">
+            <Mail className="w-5 h-5 text-white" />
+          </div>
+          <h1 className="text-lg font-semibold tracking-tight text-zinc-900">Elite Email Drafter</h1>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 text-xs font-medium text-zinc-500 bg-zinc-100 px-2 py-1 rounded-full">
+            <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+            Gemini 2.5 Pro Active
+          </div>
+        </div>
+      </header>
 
-      {isMobileSidebarOpen && (
-          <div 
-            className="fixed inset-0 bg-black/50 z-30 md:hidden backdrop-blur-sm transition-opacity"
-            onClick={() => setIsMobileSidebarOpen(false)}
-          />
-      )}
+      <main className="flex-1 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-6 p-6">
+        {/* Left Column: Input Form */}
+        <div className="lg:col-span-7 space-y-6">
+          <section className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6 space-y-6">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-zinc-900 font-medium">
+                <User className="w-4 h-4" />
+                <h2>Recipient Information</h2>
+              </div>
+              <input
+                type="text"
+                placeholder="e.g. John Doe (Customer Support Lead)"
+                className="w-full px-4 py-2 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 focus:border-zinc-900 transition-all"
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+              />
+            </div>
 
-      <Sidebar 
-        activeChannel={activeChannel} 
-        onChannelSelect={(ch: string) => { setActiveChannel(ch); setIsMobileSidebarOpen(false); }} 
-        connectionStatus={connectionStatus}
-        contextLinks={getContextLinks()}
-        channelLinks={getChannelLinks()}
-        userProfile={userProfile}
-        onEditProfile={() => setIsProfileModalOpen(true)}
-        onClearChat={handleClearChat}
-        onOpenRules={() => setIsCoreRulesOpen(true)}
-        onOpenSourceTruth={() => setIsSourceTruthOpen(true)}
-        onOpenSustainability={() => setIsSustainabilityOpen(true)}
-        isOpen={isMobileSidebarOpen}
-        onClose={() => setIsMobileSidebarOpen(false)}
-        brandLogo={brandLogo}
-        detectedContext={detectedContext}
-      />
-      
-      <main className="flex-1 min-w-0 relative flex flex-col z-0 transition-all duration-300 h-full">
-        <ChatPanel 
-            activeChannel={activeChannel}
-            messages={getCurrentMessages()}
-            isLoading={isLoading}
-            onSendMessage={handleSendMessage}
-            onStopGeneration={handleStopGeneration}
-            onClearChat={handleClearChat}
-            onRegenerate={handleRegenerate}
-            canRegenerate={canRegenerate}
-            draft={drafts[activeChannel] || ''}
-            onDraftChange={handleDraftChange}
-            detectedContext={detectedContext}
-            onManualContextChange={setManualContext}
-            isLimitReached={dailyUsage.count >= DAILY_USAGE_LIMIT}
-            onToggleSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
-            onOpenSustainability={() => setIsSustainabilityOpen(true)}
-            brandLogo={brandLogo}
-            onQuickSummary={handleQuickSummary}
-            isAdmin={isAdmin}
-        />
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-zinc-900 font-medium">
+                <MessageSquare className="w-4 h-4" />
+                <h2>Email Context & Purpose</h2>
+              </div>
+              <textarea
+                placeholder="What is this email about? Include key points, questions to answer, or specific details..."
+                className="w-full h-40 px-4 py-3 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 focus:border-zinc-900 transition-all resize-none"
+                value={context}
+                onChange={(e) => setContext(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-zinc-900 font-medium">
+                <Sparkles className="w-4 h-4" />
+                <h2>Tone & Style</h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {TONES.map((t) => {
+                  const Icon = t.icon;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setTone(t.id)}
+                      className={cn(
+                        "flex items-center gap-2 px-4 py-2 rounded-full border transition-all text-sm font-medium",
+                        tone === t.id 
+                          ? "bg-zinc-900 border-zinc-900 text-white shadow-md" 
+                          : "bg-white border-zinc-200 text-zinc-600 hover:border-zinc-300"
+                      )}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-2">
+              <button
+                onClick={handleGenerate}
+                disabled={isGenerating || !context.trim()}
+                className="w-full py-3 bg-zinc-900 text-white rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-zinc-900/10"
+              >
+                {isGenerating ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    Drafting with Elite Standards...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-5 h-5" />
+                    Generate Elite Draft
+                  </>
+                )}
+              </button>
+            </div>
+          </section>
+
+          {/* Additional Instructions */}
+          <section className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2 text-zinc-900 font-medium">
+                <Info className="w-4 h-4" />
+                <h2>Additional Instructions</h2>
+              </div>
+            </div>
+            <input
+              type="text"
+              placeholder="e.g. Mention the discount code 'SUMMER20', keep it under 100 words..."
+              className="w-full px-4 py-2 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900/5 focus:border-zinc-900 transition-all"
+              value={additionalInstructions}
+              onChange={(e) => setAdditionalInstructions(e.target.value)}
+            />
+          </section>
+        </div>
+
+        {/* Right Column: Best Practices & Preview */}
+        <div className="lg:col-span-5 space-y-6">
+          {/* Best Practices Panel */}
+          <section className="bg-zinc-900 rounded-2xl text-white p-6 shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-10">
+              <Search className="w-24 h-24" />
+            </div>
+            <div className="relative z-10 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-white/10 rounded-lg">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <h2 className="font-semibold tracking-tight">Elite Best Practices</h2>
+                </div>
+                <button 
+                  onClick={handleFetchBestPractices}
+                  disabled={isFetchingPractices}
+                  className="p-1.5 hover:bg-white/10 rounded-lg transition-colors disabled:opacity-50"
+                  title="Refresh Best Practices"
+                >
+                  <RefreshCw className={cn("w-4 h-4", isFetchingPractices && "animate-spin")} />
+                </button>
+              </div>
+              
+              {isFetchingPractices ? (
+                <div className="space-y-2 animate-pulse">
+                  <div className="h-4 bg-white/10 rounded w-3/4" />
+                  <div className="h-4 bg-white/10 rounded w-1/2" />
+                  <div className="h-4 bg-white/10 rounded w-5/6" />
+                </div>
+              ) : (
+                <div className="text-sm text-zinc-300 leading-relaxed max-h-48 overflow-y-auto scrollbar-thin">
+                  <ReactMarkdown>{bestPractices}</ReactMarkdown>
+                </div>
+              )}
+              
+              <div className="pt-2 flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-zinc-500">
+                <span className="w-1 h-1 bg-zinc-500 rounded-full" />
+                Applied to every draft
+              </div>
+            </div>
+          </section>
+
+          {/* Preview Panel */}
+          <section className="bg-white rounded-2xl border border-zinc-200 shadow-sm flex flex-col h-[calc(100vh-400px)] min-h-[400px]">
+            <div className="p-4 border-b border-zinc-100 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-zinc-900">Email Preview</h2>
+              {draft && (
+                <button
+                  onClick={copyToClipboard}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-xs font-medium transition-all"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+            <div className="flex-1 p-6 overflow-y-auto bg-zinc-50/30">
+              <AnimatePresence mode="wait">
+                {draft ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="prose prose-sm max-w-none text-zinc-800"
+                  >
+                    <ReactMarkdown>{draft}</ReactMarkdown>
+                  </motion.div>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-40">
+                    <div className="w-12 h-12 bg-zinc-100 rounded-full flex items-center justify-center">
+                      <Mail className="w-6 h-6 text-zinc-400" />
+                    </div>
+                    <p className="text-sm text-zinc-500 max-w-[200px]">
+                      Your elite draft will appear here after generation.
+                    </p>
+                  </div>
+                )}
+              </AnimatePresence>
+            </div>
+          </section>
+        </div>
       </main>
 
-      <ProfileSettingsModal 
-        isOpen={isProfileModalOpen}
-        onClose={() => setIsProfileModalOpen(false)}
-        userProfile={userProfile}
-        onSave={setUserProfile}
-        onDisconnect={handleDisconnectApiKey} 
-        isAdmin={isAdmin}
-        brandLogo={brandLogo}
-        onSaveBrandLogo={setBrandLogo}
-        usageLimit={DAILY_USAGE_LIMIT}
-        dailyUsage={dailyUsage}
-      />
-
-      <CoreRulesModal 
-        isOpen={isCoreRulesOpen}
-        onClose={() => setIsCoreRulesOpen(false)}
-        rules={coreRules}
-        onUpdateRules={setCoreRules}
-        readOnly={false}
-      />
-      
-      <SourceTruthModal
-        isOpen={isSourceTruthOpen}
-        onClose={() => setIsSourceTruthOpen(false)}
-        initialContent={sourceTruthContent}
-        onSave={setSourceTruthContent}
-      />
-
-      <SustainabilityModal 
-        isOpen={isSustainabilityOpen}
-        onClose={() => setIsSustainabilityOpen(false)}
-      />
+      {/* Error Toast */}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 z-50"
+          >
+            <AlertCircle className="w-5 h-5" />
+            <span className="text-sm font-medium">{error}</span>
+            <button onClick={() => setError(null)} className="ml-2 hover:opacity-80">
+              <ChevronRight className="w-4 h-4 rotate-90" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
